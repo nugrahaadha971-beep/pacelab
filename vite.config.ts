@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  // GitHub Pages: ganti sesuai nama repositori (mis. '/pacelab/')
-  base: '/pacelab/',
+  // Relatif: berfungsi di subpath GitHub Pages tanpa mengganti nama repositori
+  base: './',
   plugins: [
     react(),
     VitePWA({
