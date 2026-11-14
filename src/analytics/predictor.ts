@@ -71,3 +71,29 @@ export function predictAll(workouts: Workout[], now: number): Record<RaceDistanc
   }
   return out;
 }
+
+/** Titik tengah rentang %VO2max Daniels: 59–74, 75–84, 83–88, 95–100. */
+export const ZONE_FRACTION = { easy: 0.665, marathon: 0.795, threshold: 0.855, interval: 0.975 } as const;
+
+/** VDOT (Daniels): VO2 = −4,60 + 0,182258·v + 0,000104·v²; dibagi % VO2max menurut durasi t (menit). */
+export function vdot(distanceM: number, timeSec: number): number {
+  const t = timeSec / 60;
+  const v = distanceM / t;
+  const vo2 = -4.6 + 0.182258 * v + 0.000104 * v * v;
+  const pct = 0.8 + 0.1894393 * Math.exp(-0.012778 * t) + 0.2989558 * Math.exp(-0.1932605 * t);
+  return vo2 / pct;
+}
+
+/** Kecepatan (m/menit) yang menghasilkan VO2 = fraction × VDOT (selesaikan persamaan kuadrat). */
+export function velocityFor(V: number, fraction: number): number {
+  const a = 0.000104, b = 0.182258;
+  return (-b + Math.sqrt(b * b + 4 * a * (4.6 + fraction * V))) / (2 * a);
+}
+
+/** VDOT terbaik dari sesi ≥ 3 km dalam 42 hari terakhir. */
+export function currentVdot(workouts: Workout[], now: number): number | null {
+  const vals = workouts
+    .filter((w) => w.date > now - BEST_WINDOW_DAYS * DAY_MS && w.date <= now && w.distanceKm >= 3 && w.durationSec > 0)
+    .map((w) => vdot(w.distanceKm * 1000, w.durationSec));
+  return vals.length ? Math.max(...vals) : null;
+}

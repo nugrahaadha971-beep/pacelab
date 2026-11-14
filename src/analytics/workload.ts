@@ -1,4 +1,4 @@
-import type { Workout, UserProfile, WorkoutDraft } from './types';
+import type { Workout, UserProfile, WorkoutDraft, LapSplit } from './types';
 
 export const DAY_MS = 86_400_000;
 export const EF_IMPROVEMENT_PCT = 2;
@@ -77,4 +77,19 @@ export function efTrend(workouts: Workout[], now: number): EfTrend {
   if (recent == null || prior == null || prior <= 0) return { recent, prior, changePct: null, improving: false };
   const changePct = ((recent - prior) / prior) * 100;
   return { recent, prior, changePct, improving: changePct >= EF_IMPROVEMENT_PCT };
+}
+
+const avg = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
+
+/**
+ * Cardiac drift = penurunan EF antara paruh pertama dan kedua lap (aerobic decoupling).
+ * Positif = efisiensi turun. Butuh minimal 4 lap dengan HR.
+ */
+export function cardiacDrift(laps: LapSplit[]): number | null {
+  const u = laps.filter((l): l is LapSplit & { avgHr: number } => l.avgHr != null && l.paceSec > 0);
+  if (u.length < 4) return null;
+  const h = Math.floor(u.length / 2);
+  const ef = (ls: typeof u) => (60000 / avg(ls.map((l) => l.paceSec))) / avg(ls.map((l) => l.avgHr));
+  const e1 = ef(u.slice(0, h)), e2 = ef(u.slice(h));
+  return ((e1 - e2) / e1) * 100;
 }
