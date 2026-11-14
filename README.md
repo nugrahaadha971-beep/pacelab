@@ -2,8 +2,8 @@
 
 ## Status per fase
 - **Fase 1** Scaffold Vite + React + TS, skema Dexie (`workouts`, `userProfile`), ekspor/impor JSON, layar profil. Tailwind belum dipasang.
-- **Fase 2** Impor GPX (DOMParser, moving time, lap per km, HR, elevasi) dan input manual dengan validasi durasi serta RPE. **Parser FIT belum dibangun** (perlu `fit-file-parser`, belum diuji).
-- **Fase 3** Engine analitik: Tanaka, Banister TRIMP, Session-RPE, EF + tren 14 hari, ACWR, Riegel + penalti volume dan long run. Ada tes unit. **VDOT belum diimplementasi** (tidak ada rumus di blueprint).
+- **Fase 2** Impor GPX (DOMParser, moving time, lap per km, HR, elevasi) dan input manual dengan validasi durasi serta RPE. **Parser FIT** sudah ada (`fitParser.ts`, decoder biner mandiri tanpa dependensi). Fase 2 selesai.
+- **Fase 3** Engine analitik: Tanaka, Banister TRIMP, Session-RPE, EF + tren 14 hari, ACWR, Riegel + penalti volume dan long run. Ada tes unit. **VDOT** ada sejak v1.7 (rumus Daniels).
 - **Fase 4** Konfigurasi PWA (`vite-plugin-pwa`, `manifest.json`, `base` GitHub Pages). **Belum ada**: lima tab penuh, grafik Recharts, styling mengikuti mockup, ikon PWA (`public/icons/`).
 
 ## Perbaikan terhadap blueprint
@@ -30,3 +30,15 @@ Untuk GitHub Pages, sesuaikan `base` di `vite.config.ts` dengan nama repositori.
 - Kolom half marathon dan marathon tidak dipakai.
 - Temuan di PDF: Minggu 1 (Tempo) langkahnya berjumlah 20:00, tetapi judulnya 15:00. Teks PDF menyebut dua recovery run per minggu, tetapi Minggu 1 memiliki tiga.
 - Input 5K tidak disimpan; diisi ulang setiap buka layar.
+
+## v1.6.0 — Fase 2 selesai (Parser FIT)
+- `src/parsers/fitParser.ts`: membaca header, definisi/data pesan, header timestamp terkompresi, dan field developer (dilewati). Mengambil session (jarak, durasi, HR, elevasi) dan split per km dari record.
+- Tes memakai berkas FIT sintetis. Belum diuji dengan berkas Garmin/Coros asli.
+- Asumsi: cadence dikali 2 (sama dengan GPX); bila ada beberapa session, yang dipakai session pertama; CRC berkas belum divalidasi.
+
+## v1.7.0 — Fase 3 selesai
+- `workload.ts`: `cardiacDrift(laps)` = penurunan EF paruh pertama ke paruh kedua lap (aerobic decoupling). Butuh minimal 4 lap dengan HR.
+- `predictor.ts`: `vdot()` (Daniels), `velocityFor()` untuk zona pace (titik tengah %VO2max: 66,5 / 79,5 / 85,5 / 97,5), `currentVdot()` dari sesi ≥ 3 km dalam 42 hari.
+- `coachEngine.ts`: aturan blueprint 4.1 (catatan EF) dan 4.2 (ACWR → sesi berikutnya). Murni logika, tanpa dependensi UI.
+- Asumsi yang perlu ditinjau: ambang drift 5%, durasi tambahan +10 menit untuk beban rendah, dan titik tengah zona Daniels.
+- Fase 4 (grafik Recharts, lima tab, UI backup, ikon PWA) belum dikerjakan.
