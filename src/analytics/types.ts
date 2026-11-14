@@ -20,6 +20,7 @@ export interface Workout {
   trimp?: number | null;
   efficiencyFactor?: number | null;
   laps: LapSplit[];
+  note?: string;
 }
 
 export type WorkoutDraft = Omit<Workout, 'id' | 'trimp' | 'efficiencyFactor'>;
@@ -32,4 +33,5 @@ export interface UserProfile {
   targetDistance: RaceDistance;
   targetRaceDate: number;
   targetTimeSec: number;
+  weeklyTargetKm?: number;
 }

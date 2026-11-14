@@ -42,3 +42,29 @@ Untuk GitHub Pages, sesuaikan `base` di `vite.config.ts` dengan nama repositori.
 - `coachEngine.ts`: aturan blueprint 4.1 (catatan EF) dan 4.2 (ACWR → sesi berikutnya). Murni logika, tanpa dependensi UI.
 - Asumsi yang perlu ditinjau: ambang drift 5%, durasi tambahan +10 menit untuk beban rendah, dan titik tengah zona Daniels.
 - Fase 4 (grafik Recharts, lima tab, UI backup, ikon PWA) belum dikerjakan.
+
+## v1.9.0 — Fase 4 tuntas
+- `.github/workflows/deploy.yml`: build dan deploy otomatis ke GitHub Pages pada push ke `main`. Di pengaturan repositori, pilih Settings → Pages → Source: GitHub Actions. Commit `package-lock.json` agar `npm ci` dipakai; tanpa lockfile, workflow memakai `npm install`.
+- Tes tidak dijalankan di workflow karena butuh Node 22+ (`--experimental-strip-types`), sedangkan workflow memakai Node 20.
+- `UserProfile.weeklyTargetKm` dan `Workout.note` bersifat opsional, sehingga data lama tetap kompatibel.
+- Filter kategori jarak memakai jarak lomba terdekat dengan selisih ≤ 10%. Sesi di luar itu hanya tampil di "Semua jarak".
+- Riwayat: pencarian dibatasi pada catatan dan jenis sesi, karena sesi tidak punya judul.
+
+## v2.0.0 — penyempurnaan
+Perbaikan bug dari v1.9:
+- Max HR manual tidak lagi tertimpa Tanaka saat profil disimpan ulang (checkbox otomatis hanya aktif bila nilai tersimpan memang hasil Tanaka).
+- Impor FIT/GPX tanpa HR kini meminta RPE; sebelumnya beban (TRIMP) tercatat 0 tanpa peringatan.
+- Impor memilih jenis sesi (sebelumnya selalu Easy, yang mencemari tren EF); jenis dan catatan bisa diubah di detail sesi.
+- Impor berkas yang sama (atau FIT dan GPX dari lari yang sama) dilewati: waktu mulai ≤ 2 menit dan jarak ≤ 0,1 km.
+- Input berkas direset setelah dipakai sehingga berkas yang sama bisa dipilih ulang.
+- Sesi manual punya tanggal (tidak lagi selalu hari ini).
+- Warna tema status bar disamakan dengan latar aplikasi; layar kembali ke atas saat pindah tab.
+
+Tambahan:
+- Jarum ACWR (gauge) dan pita zona 0,8–1,3 pada grafik ACWR.
+- Filter jenis sesi di Riwayat; tombol "Hapus semua data lokal" di Profil.
+- Impor cadangan divalidasi (`src/db/validate.ts`): sesi rusak dilewati dan dilaporkan; profil lama dipertahankan bila cadangan tidak memuat profil valid.
+- Input 5K di Program tersimpan di localStorage (tidak ikut cadangan JSON) dan terisi awal dari prediksi Riegel.
+- Ikon stopwatch baru, termasuk varian maskable.
+- Workflow menjalankan tes (Node 22) sebelum build (Node 20). Hapus job `test` dan `needs: test` bila tidak diinginkan.
+- `src/analytics`, `src/parsers`, dan `src/plans` tidak diubah dari v1.9.

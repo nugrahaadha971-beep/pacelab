@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react';
 import type { UserProfile, Workout } from '../analytics/types';
 import { acwr, efTrend, cardiacDrift, DAY_MS } from '../analytics/workload';
 import { currentVdot, velocityFor, ZONE_FRACTION } from '../analytics/predictor';
@@ -6,7 +5,7 @@ import { coachAdvice } from '../analytics/coachEngine';
 import type { SessionRec } from '../analytics/coachEngine';
 import { fmtPace } from '../plans/pace';
 
-const card: CSSProperties = { background: '#131a22', borderRadius: 12, padding: 12, margin: '12px 0', display: 'grid', gap: 6 };
+const card = 'my-3 grid gap-2 rounded-xl bg-navy-800 p-4';
 const SESSION: Record<SessionRec, string> = {
   easy: 'Easy Run', tempo: 'Tempo Run', interval: 'Interval', long_run: 'Long Run', recovery: 'Recovery Run', rest: 'Istirahat',
 };
@@ -29,7 +28,7 @@ export default function CoachCard({ workouts, profile }: { workouts: Workout[]; 
   const vd = currentVdot(workouts, t);
 
   return (
-    <section style={card}>
+    <section className={card}>
       <strong>Saran Pelatih</strong>
       <span>{advice.headline}</span>
       <span>{advice.detail}</span>
