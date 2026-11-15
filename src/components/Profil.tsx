@@ -55,6 +55,7 @@ export default function Profil({ profile, onSaved }: { profile: UserProfile | nu
       const parts = [`${r.workouts} sesi dipulihkan`];
       if (r.skipped) parts.push(`${r.skipped} dilewati karena data rusak`);
       if (r.profile) parts.push('profil dipulihkan');
+      if (r.schedule) parts.push('jadwal latihan dipulihkan');
       setMsg({ text: parts.join(', ') + '.', ok: true });
       onSaved();
     } catch (err) {

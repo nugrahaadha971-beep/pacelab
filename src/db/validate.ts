@@ -1,4 +1,6 @@
 import type { RaceDistance, Source, UserProfile, Workout, WorkoutType } from '../analytics/types';
+import { normalizeScheduleState } from '../plans/schedule.ts';
+import type { ScheduleState } from '../plans/schedule.ts';
 
 const SOURCES: readonly string[] = ['fit', 'gpx', 'manual'];
 const TYPES: readonly string[] = ['easy', 'tempo', 'interval', 'long_run', 'race'];
@@ -58,7 +60,7 @@ export function normalizeProfile(raw: unknown): UserProfile | null {
   };
 }
 
-export interface ParsedBackup { workouts: Workout[]; profile: UserProfile | null; skipped: number }
+export interface ParsedBackup { workouts: Workout[]; profile: UserProfile | null; skipped: number; schedule: ScheduleState | null }
 
 export function parseBackup(data: unknown): ParsedBackup {
   if (!isObj(data) || data.app !== 'pacelab' || !Array.isArray(data.workouts)) {
@@ -72,7 +74,7 @@ export function parseBackup(data: unknown): ParsedBackup {
     else skipped++;
   }
   const rawProfile = Array.isArray(data.userProfile) ? data.userProfile[0] : data.userProfile;
-  return { workouts, profile: normalizeProfile(rawProfile), skipped };
+  return { workouts, profile: normalizeProfile(rawProfile), skipped, schedule: normalizeScheduleState(data.schedule) };
 }
 
 type Key = Pick<Workout, 'date' | 'distanceKm'>;

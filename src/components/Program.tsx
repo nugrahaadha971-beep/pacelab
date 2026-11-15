@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import type { RaceDistance, UserProfile, Workout } from '../analytics/types';
-import { DAY_MS } from '../analytics/workload';
+import { db } from '../db/database';
 import { currentVdot, PENALTY_RULES, penaltyPct, predictAll, RACE_KM, velocityFor, ZONE_FRACTION } from '../analytics/predictor';
 import { fmtPace } from '../plans/pace';
-import { fmtHms } from './format';
+import { pbOutlook } from '../plans/adaptiveEngine';
+import { isoFromRaceTs, isValidIso, remaining } from '../plans/schedule';
+import { DAY_MS } from '../analytics/workload';
+import { fmtHms, todayStr } from './format';
 import TrainingPlan from './TrainingPlan';
 
 type Zone = keyof typeof ZONE_FRACTION;
 const card = 'rounded-xl bg-navy-800 p-4';
+const field = 'mt-1 w-full rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 tabular-nums text-slate-100 focus:border-coral focus:outline-none';
 const ZONE_NAME: Record<Zone, string> = { easy: 'Easy', marathon: 'Marathon', threshold: 'Threshold', interval: 'Interval' };
 
 function ProgressBar({ ratio }: { ratio: number }) {
@@ -17,14 +22,25 @@ function ProgressBar({ ratio }: { ratio: number }) {
   );
 }
 
-export default function Program({ profile, workouts }: { profile: UserProfile; workouts: Workout[] }) {
+export default function Program({ profile, workouts, onProfileChange }: { profile: UserProfile; workouts: Workout[]; onProfileChange: () => void }) {
   const now = Date.now();
+  const raceIso = profile.targetRaceDate ? isoFromRaceTs(profile.targetRaceDate) : null;
+  const [raceText, setRaceText] = useState(raceIso ?? '');
+  const saveRaceDate = async (v: string) => {
+    setRaceText(v);
+    if (v !== '' && !isValidIso(v)) return;
+    await db.userProfile.put({ ...profile, targetRaceDate: v ? Date.parse(v) : 0 });
+    onProfileChange();
+  };
   const target: RaceDistance = profile.targetDistance;
-  const daysLeft = profile.targetRaceDate ? Math.ceil((profile.targetRaceDate - now) / DAY_MS) : null;
+  const rem = raceIso ? remaining(raceIso, todayStr()) : null;
+  const daysLeft = rem ? rem.daysRemaining : null;
   const goalPace = profile.targetTimeSec / RACE_KM[target];
   const preds = predictAll(workouts, now);
   const pred = preds[target];
   const gap = pred ? pred.finalSec - profile.targetTimeSec : null;
+  const outlook = pred ? pbOutlook(pred.finalSec, profile.targetTimeSec, rem?.weeksRemaining ?? 0) : null;
+  const currentPace = pred ? pred.finalSec / RACE_KM[target] : null;
   const rule = PENALTY_RULES[target];
   const last28 = workouts.filter((w) => w.date <= now && now - w.date <= 28 * DAY_MS);
   const weeklyKm = last28.reduce((s, w) => s + w.distanceKm, 0) / 4;
@@ -33,16 +49,21 @@ export default function Program({ profile, workouts }: { profile: UserProfile; w
   const penMin = pred ? (pred.finalSec - pred.baseSec) / 60 : 0;
   const vd = currentVdot(workouts, now);
   const zones = Object.keys(ZONE_FRACTION) as Zone[];
+  const easyPace = vd != null ? 60000 / velocityFor(vd, ZONE_FRACTION.easy) : 360;
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Program</h1>
 
+      <label className={`${card} block text-sm`}>Tanggal lomba <span className="text-xs text-slate-400">(sinkron dengan Profil)</span>
+        <input type="date" value={raceText} onChange={(e) => void saveRaceDate(e.target.value)} className={field} />
+      </label>
+
       <section className={card}>
         <div className="text-xs uppercase tracking-wide text-slate-400">Hitung mundur · {target}</div>
         <div className="mt-1 text-4xl font-bold tabular-nums text-coral">{daysLeft == null ? '–' : Math.max(0, daysLeft)}</div>
         <div className="text-sm text-slate-400">
-          {daysLeft == null ? 'Atur tanggal lomba di Profil' : daysLeft < 0 ? 'Lomba sudah lewat' : 'hari lagi'}
+          {daysLeft == null ? 'Isi tanggal lomba di atas' : daysLeft < 0 ? 'Lomba sudah lewat' : `hari lagi · ${rem?.weeksRemaining} minggu`}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3 text-sm tabular-nums">
           <div>Target waktu<div className="font-semibold">{fmtHms(profile.targetTimeSec)}</div></div>
@@ -50,6 +71,17 @@ export default function Program({ profile, workouts }: { profile: UserProfile; w
           <div>Prediksi saat ini<div className="font-semibold">{pred ? fmtHms(pred.finalSec) : '–'}</div></div>
           <div>Selisih<div className="font-semibold">{gap == null ? '–' : gap > 0 ? `+${fmtHms(gap)}` : `−${fmtHms(-gap)}`}</div></div>
         </div>
+        {outlook && currentPace != null && (
+          <div className="mt-3 rounded-lg bg-navy-900 p-3 text-sm tabular-nums">
+            <div className="text-[11px] uppercase text-slate-400">Peluang pecah PB</div>
+            <div className="font-semibold text-coral">{outlook.label}</div>
+            <div className="mt-1 text-slate-300">
+              Gap waktu: {outlook.gapSec > 0 ? `+${Math.round(outlook.gapSec)} dtk (${fmtHms(outlook.gapSec)})` : `${Math.round(outlook.gapSec)} dtk, sudah di bawah target`}
+            </div>
+            <div className="text-slate-300">Pace: {fmtPace(currentPace)} → {fmtPace(goalPace)} /km</div>
+            {outlook.perWeekSec != null && <div className="text-slate-300">Perlu ≈ {outlook.perWeekSec.toFixed(1)} dtk perbaikan/minggu</div>}
+          </div>
+        )}
       </section>
 
       <section className={card}>
@@ -105,7 +137,7 @@ export default function Program({ profile, workouts }: { profile: UserProfile; w
         )}
       </section>
 
-      <TrainingPlan defaultK5Sec={preds['5K']?.finalSec ?? null} />
+      <TrainingPlan profile={profile} workouts={workouts} defaultK5Sec={preds['5K']?.finalSec ?? null} currentPaceSecPerKm={currentPace} startWeeklyKm={weeklyKm} easyPaceSecPerKm={easyPace} />
     </div>
   );
 }

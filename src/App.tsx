@@ -42,7 +42,7 @@ export default function App() {
     <div className="min-h-dvh bg-navy-900 text-slate-100">
       <main className="mx-auto max-w-md px-4 pt-6 pb-24">
         {tab === 'beranda' && <Beranda profile={profile} workouts={workouts} reload={reload} />}
-        {tab === 'program' && <Program profile={profile} workouts={workouts} />}
+        {tab === 'program' && <Program profile={profile} workouts={workouts} onProfileChange={reload} />}
         {tab === 'analitik' && <Analitik profile={profile} workouts={workouts} />}
         {tab === 'riwayat' && <Riwayat workouts={workouts} reload={reload} />}
         {tab === 'profil' && <Profil profile={profile} onSaved={reload} />}

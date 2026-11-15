@@ -40,3 +40,10 @@ export function targetFor(key: PaceKey | null, row: number[] | null): string | n
   const sec = row[COL[key]];
   return `${fmtPace(sec)}/mi · ${fmtPace(sec / 1.609344)}/km`;
 }
+
+/** Seperti targetFor, tetapi menggeser pace sebesar deltaSecPerKm (+ lebih lambat, − lebih cepat). Pace "best" tidak digeser. */
+export function targetForAdjusted(key: PaceKey | null, row: number[] | null, deltaSecPerKm: number): string | null {
+  if (!key || key === 'best' || !row || !deltaSecPerKm) return targetFor(key, row);
+  const sec = row[COL[key]] + deltaSecPerKm * 1.609344;
+  return `${fmtPace(sec)}/mi · ${fmtPace(sec / 1.609344)}/km`;
+}

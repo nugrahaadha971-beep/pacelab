@@ -68,3 +68,33 @@ Tambahan:
 - Ikon stopwatch baru, termasuk varian maskable.
 - Workflow menjalankan tes (Node 22) sebelum build (Node 20). Hapus job `test` dan `needs: test` bila tidak diinginkan.
 - `src/analytics`, `src/parsers`, dan `src/plans` tidak diubah dari v1.9.
+
+## v2.1.0 — Pelatih Pemecah PB Adaptif dengan Jadwal Tanggal Nyata
+Label statis "8 minggu lagi" dihapus. Tab **Program** kini memetakan rencana mundur dari `targetRaceDate`.
+
+**Kalender mundur** (`src/plans/schedule.ts`)
+- `daysRemaining = ceil((tanggal lomba − hari ini) / 86400000)`, `weeksRemaining = ceil(daysRemaining / 7)`, dihitung pada tanggal kalender (aman DST).
+- `weeksRemaining > 8`: minggu awal = **Base Building** (Easy Run + Long Run, target volume naik maks +10%/minggu, berhenti di batas `weeklyTargetKm` profil → syarat volume 21,1K/42,2K → 50 km), lalu blok puncak 8 minggu (templat Nike).
+- `weeksRemaining ≤ 8`: memakai N minggu **terakhir** templat Nike; sesi terakhir = **Hari Lomba / Uji PB** tepat di `targetRaceDate`; minggu terakhir = **Taper** (volume −35%, langkah pace speed dipertahankan).
+- Minggu rencana adalah blok 7 hari yang dihitung mundur dari hari lomba (bukan Senin–Minggu).
+- Tanggal lomba bisa diubah di atas tab Program (tersimpan ke profil, sinkron dengan Profil).
+
+**Hari latihan & Adjust Jadwal**
+- Pilih hari rutin (default Sel/Kam/Sab/Min, minimal 3). Long Run jatuh di Sab/Min pilihan; Speed tidak pernah bersebelahan dengan Long Run (termasuk lintas minggu). Bila hari terpilih tidak memungkinkan, Speed diturunkan jadi Easy Run dan ditandai. Bila hari lebih sedikit daripada sesi, Recovery dibuang lebih dulu.
+- Geser semua ±1 hari, Reset, ubah tanggal per sesi, tukar sesi (dalam minggu yang sama). Hari lomba tidak ikut bergeser; sesi lain tidak bisa jatuh pada/setelah hari lomba.
+- Disimpan di `localStorage` (`pacelab.schedule`) dan ikut diekspor/diimpor di cadangan JSON (field `schedule`, cadangan lama tanpa field itu tetap bisa diimpor).
+- Auto-Complete: sesi berstatus Selesai bila ada catatan latihan pada tanggal itu (≤ hari ini); bisa juga dicentang manual.
+
+**Mesin adaptif** (`src/plans/adaptiveEngine.ts`)
+- Progresi pace: `weekPace = currentPace − (currentPace − targetPace) × (minggu / totalMinggu)`; `currentPace` = proyeksi Riegel. Kartu atas Program menampilkan gap waktu, label peluang, dan perbaikan per minggu yang dibutuhkan.
+- Aturan setelah sesi terakhir (dievaluasi ulang setiap render, jadi hilang/berubah saat data baru masuk): ACWR > 1,3 → Speed berikutnya jadi Recovery Easy Run, −20% durasi; EF terakhir ≥ rata-rata EF 14 hari +3% → pace Speed berikutnya −4 dtk/km; drift > 5% → pace Easy berikutnya +12 dtk/km; ACWR < 0,8 dan drift ≤ 5% → Easy/Long berikutnya +10% (maks +10 menit).
+
+**Keputusan/asumsi yang perlu ditinjau**
+- "Sesi berikutnya" = sesi pertama dengan tanggal ≥ hari ini yang belum selesai, per jenis (Speed / Easy / Easy-atau-Long). Aturan 1 menang atas aturan 2 pada sesi yang sama.
+- Rata-rata EF 14 hari = sesi ber-EF dalam 14 hari sebelum sesi terakhir, tidak termasuk sesi terakhir, semua jenis sesi (sama seperti spesifikasi; membandingkan EF antarintensitas bisa bias).
+- Drift tidak diketahui (tanpa lap/HR) dianggap ≤ 5% untuk aturan 4.
+- Bila proyeksi sudah lebih cepat dari target, pace ditahan di pace target (rumus apa adanya akan melambat).
+- Estimasi durasi sesi Speed = jumlah langkah berdurasi, minimal 30 menit. Sesi bernama jarak dikonversi lewat easy pace (zona VDOT, default 6:00/km). Persen long run Base (35%), ambang label peluang (2/5/10%) juga asumsi.
+- Blok puncak tetap templat Nike 5K walau jarak target lain; hint pace chart mengikuti input 5K, dan pace target PB mengikuti jarak target. Volume akhir Base bisa jauh di atas volume minggu pertama Nike; itu sifat templatnya.
+- `PB` di sini = proyeksi Riegel saat ini (aplikasi belum menyimpan PB terpisah).
+- `tsconfig.json`: `allowImportingTsExtensions` diaktifkan agar modul yang diuji lewat `node --experimental-strip-types` bisa saling impor.
