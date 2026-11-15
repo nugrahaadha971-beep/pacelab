@@ -206,13 +206,159 @@ test('cadangan JSON: jadwal ikut diekspor/diimpor lewat parseBackup', () => {
   assert.equal(parseBackup({ app: 'pacelab', workouts: [] }).schedule, null);
 });
 
-test('Base: data volume sangat kecil tidak menghasilkan lari mini; Easy Run ≥ 2 km, volume awal ≥ 10 km', async () => {
-  const { MIN_BASE_WEEKLY_KM, MIN_EASY_KM } = await import('./schedule.ts');
-  for (const days of [[2, 4, 6, 0], [1, 2, 3, 4, 5, 6, 0], [3, 6]]) {
+test('Base: data volume sangat kecil tidak menghasilkan lari mini; Easy Run 2,0–2,5 km, volume awal ≥ 10 km', async () => {
+  const { MIN_BASE_WEEKLY_KM } = await import('./schedule.ts');
+  for (const days of [[2, 4, 6, 0], [1, 2, 3, 4, 5, 6, 0], [3, 5, 6]]) {
     const p = buildPlan(opts({ days, startWeeklyKm: 2.5 }));
-    assert.equal(p.weeks[0].plannedKm, MIN_BASE_WEEKLY_KM);
+    assert.ok((p.weeks[0].plannedKm as number) >= (days.length >= 4 ? MIN_BASE_WEEKLY_KM : 9), `${days}: ${p.weeks[0].plannedKm}`);
     for (const s of p.weeks.filter((w) => w.phase === 'base').flatMap((w) => w.sessions)) {
-      if (s.kind === 'recovery') assert.ok((s.distanceKm as number) >= MIN_EASY_KM - 0.05, `${days}: Easy ${s.distanceKm} km`);
+      if (s.kind === 'recovery') assert.ok((s.distanceKm as number) >= 2 - 0.05 && (s.distanceKm as number) <= 2.5 + 0.05, `${days}: Easy ${s.distanceKm} km`);
     }
   }
+});
+
+// ── v2.2: Long Run vs Easy, HR, kurikulum Progresif ───────────────────────────
+
+const longOk = (ws: PlanSession[], easyPace: number) => {
+  const easy = ws.filter((s) => s.kind === 'recovery' && s.zone === 'easy' && !s.demoted);
+  const long = ws.find((s) => s.kind === 'long');
+  if (!long || !easy.length) return true;
+  const eMin = Math.max(...easy.map((s) => s.durationMin as number));
+  const eKm = Math.max(...easy.map((s) => s.distanceKm as number));
+  return (long.durationMin as number) - eMin >= 15 || (long.distanceKm as number) - eKm >= 1.5 - 0.051 || (long.durationMin as number) * 60 / easyPace - (eMin * 60) / easyPace >= 1.5;
+};
+
+test('Long Run ≥ Easy terpanjang + 1,5 km atau + 15 menit, di Base dan Nike (semua kombinasi hari)', () => {
+  for (const days of [[2, 4, 6, 0], [1, 3, 5, 6], [1, 2, 3, 4, 5, 6, 0], [3, 5, 6]]) {
+    for (const pace of [330, 360, 541, 660]) {
+      const p = buildPlan(opts({ days, easyPaceSecPerKm: pace, raceIso: '2027-03-14' }));
+      for (const w of p.weeks) {
+        if (w.phase === 'taper' || w.deload) continue;
+        assert.ok(longOk(w.sessions, pace), `minggu ${w.weekNo} (${w.phase}) hari ${days} pace ${pace}: ${JSON.stringify(w.sessions.map((s) => [s.kind, s.durationMin, s.distanceKm]))}`);
+      }
+    }
+  }
+});
+
+test('Nike: Recovery/Easy dikunci ≤ 30 menit; Easy Base 2,0–2,5 km, Long Base lebih panjang', () => {
+  const p = buildPlan(opts({ days: [2, 4, 6, 0], easyPaceSecPerKm: 541, raceIso: '2027-03-14' }));
+  for (const s of all(p)) if (s.kind === 'recovery' && s.zone === 'easy') assert.ok((s.durationMin as number) <= 30, `${s.id} ${s.durationMin}`);
+  const base = p.weeks[0].sessions;
+  const maxEasy = Math.max(...base.filter((s) => s.kind === 'recovery').map((s) => s.distanceKm as number));
+  assert.ok((base.find((s) => s.kind === 'long')?.distanceKm as number) >= maxEasy + 1.5 - 0.05);
+});
+
+const PROG = (o: Partial<PlanOptions> = {}) => buildPlan(opts({ curriculum: 'progressive5k', raceIso: '2027-01-31', days: [2, 4, 6, 0], maxHr: 182, easyPaceSecPerKm: 541, ...o }));
+const names = (p: Plan, wk: number) => p.weeks[wk - 1].sessions.map((s) => `${weekdayOf(s.date)}:${s.name}`);
+
+test('Progresif 5K: 11 minggu menuju 31 Jan 2027, minggu 1 = 16–22 Nov, hari Sel/Kam/Sab/Min', () => {
+  const p = PROG();
+  assert.equal(p.weeksRemaining, 11);
+  assert.equal(p.baseWeeks, 0);
+  assert.equal(p.weeks.length, 11);
+  assert.equal(p.weeks[0].startIso, '2026-11-16');
+  assert.equal(p.weeks[0].endIso, '2026-11-22');
+  assert.deepEqual(p.weeks[0].sessions.map((s) => s.date), ['2026-11-17', '2026-11-19', '2026-11-21', '2026-11-22']);
+  assert.deepEqual(names(p, 1), ["2:6×(3' Lari / 1' Jalan)", "4:25' (4' Lari / 1' Jalan)", "6:25' (4' Lari / 1' Jalan)", "0:40' (5' Lari / 1' Jalan)"]);
+  assert.deepEqual(names(p, 2), ["2:5×(5' Lari / 1' Jalan)", "4:30' (6' Lari / 1' Jalan)", "6:25' (5' Lari / 1' Jalan)", "0:45' (6' Lari / 1' Jalan)"]);
+  assert.deepEqual(names(p, 3).slice(0, 3), ["2:3×(10' Lari / 2' Jalan)", "4:30' (10' Lari / 1' Jalan)", "6:25' (8' Lari / 1' Jalan)"]);
+  assert.equal(p.weeks[2].sessions[3].durationMin, 51);
+  assert.deepEqual(p.weeks.map((w) => w.title).filter((t, i, a) => a.indexOf(t) === i), ['Fondasi Lari-Jalan', 'Fondasi · Ringan + Tes 3K', 'Kecepatan & Daya Tahan', 'Kecepatan · Ringan + Tes 5K', 'Spesifik Lomba', 'Taper & Lomba']);
+});
+
+test('Progresif 5K: minggu 4 = Tes 3K Sabtu 12 Des + long ringan; minggu 8 = Tes 5K Sabtu 9 Jan', () => {
+  const p = PROG();
+  const t3k = all(p).find((s) => s.test === '3k') as PlanSession;
+  const t5k = all(p).find((s) => s.test === '5k') as PlanSession;
+  assert.equal(t3k.date, '2026-12-12');
+  assert.equal(weekdayOf(t3k.date), 6);
+  assert.equal(t5k.date, '2027-01-09');
+  assert.equal(p.weeks[3].deload, true);
+  assert.deepEqual(names(p, 4).map((x) => x.split(':').slice(1).join(':')), ["20' mudah + 4 strides", "25' (10' Lari / 1' Jalan)", 'Tes 3K', "30' mudah"]);
+  assert.equal(p.weeks[3].sessions[3].kind, 'long');
+  assert.deepEqual(names(p, 8).map((x) => x.split(':').slice(1).join(':')), ['4×400 m, jalan 2\'', "25' mudah", 'Tes 5K', "30' mudah"]);
+});
+
+test('Progresif 5K: fase 2 & 3 (interval berbasis jarak, strides, pace race) sesuai kurikulum', () => {
+  const p = PROG();
+  const n = (w: number) => p.weeks[w - 1].sessions.map((s) => s.name);
+  assert.equal(n(5)[0], "6×400 m, jalan 2'");
+  assert.equal(n(6)[0], "5×600 m, jalan 2'");
+  assert.equal(n(7)[0], "4×800 m, jalan 2,5'");
+  assert.equal(n(5)[1], "30' lari kontinu (mudah)");
+  assert.equal(n(5)[2], "25' mudah + 4 strides");
+  assert.ok(p.weeks[4].sessions[2].steps.some((x) => x.includes('4 × (20" cepat rileks / 40" jalan)')));
+  assert.equal(n(9)[0], "3×1 km pace race, jalan 2,5'");
+  assert.equal(n(9)[3], "70' mudah");
+  assert.equal(n(10)[0], "2×1,6 km pace race, jalan 3'");
+  assert.equal(n(10)[3], "60' mudah");
+  assert.deepEqual(n(11).slice(0, 3), ["3×800 m pace race, jalan 2'", "20' mudah + 4 strides", "15' mudah + 3 strides"]);
+});
+
+test('Progresif 5K: RACE 5K tepat di targetRaceDate; taper tidak dipotong dua kali; shake-out sehari sebelum lomba dipertahankan', () => {
+  const p = PROG();
+  const s = all(p);
+  assert.equal(s.at(-1)?.kind, 'race');
+  assert.equal(s.at(-1)?.date, '2027-01-31');
+  assert.deepEqual(p.weeks[10].sessions.map((x) => x.date), ['2027-01-26', '2027-01-28', '2027-01-30', '2027-01-31']);
+  assert.equal(p.weeks[10].phase, 'taper');
+  assert.equal(p.weeks[10].sessions[1].durationMin, 24, "20' + 4 strides tanpa pemangkasan tambahan");
+  assert.ok(s.at(-1)?.steps.some((x) => x.includes('Km 1')));
+});
+
+test('Progresif 5K: Long Run di Minggu, interval Selasa, tes boleh Sabtu sebelum Long Run; pola 4 hari konsisten', () => {
+  const p = PROG();
+  for (const w of p.weeks) {
+    const lg = w.sessions.find((x) => x.kind === 'long');
+    if (lg) assert.equal(weekdayOf(lg.date), 0);
+    for (const sp of w.sessions.filter((x) => x.kind === 'speed' && !x.test)) assert.equal(weekdayOf(sp.date), 2);
+  }
+  for (const sp of all(p).filter((x) => x.kind === 'speed' && !x.test)) for (const l of all(p).filter((x) => x.kind === 'long')) assert.ok(!adj(sp.date, l.date));
+});
+
+test('Progresif 5K: Long Run ≥ Easy terpanjang + 15 menit pada semua minggu non-deload (tanpa perlu dikoreksi)', () => {
+  const p = PROG();
+  for (const w of p.weeks) {
+    if (w.deload) continue;
+    const easy = w.sessions.filter((x) => x.kind === 'recovery').map((x) => x.durationMin as number);
+    const lg = w.sessions.find((x) => x.kind === 'long');
+    if (lg) assert.ok((lg.durationMin as number) - Math.max(...easy) >= 15, `minggu ${w.weekNo}`);
+  }
+});
+
+test('Progresif 5K: skala mengikuti weeksRemaining (lebih dari 11 → Base di awal; kurang dari 11 → 11 minggu terakhir)', () => {
+  const long = PROG({ raceIso: '2027-03-14' }); // 17 minggu
+  assert.equal(long.baseWeeks, 6);
+  assert.equal(long.weeks.length, 17);
+  assert.deepEqual(long.weeks.slice(0, 6).map((w) => w.phase), Array(6).fill('base'));
+  assert.equal(long.weeks[6].sessions[0].id, 'p0-0');
+  assert.equal(all(long).at(-1)?.date, '2027-03-14');
+  const short = PROG({ raceIso: '2026-12-20' }); // 5 minggu
+  assert.equal(short.weeks.length, 5);
+  assert.equal(short.weeks[0].sessions[0].id.startsWith('p6-'), true);
+  assert.equal(short.weeks.at(-1)?.sessions.at(-1)?.kind, 'race');
+  assert.equal(all(short).at(-1)?.date, '2026-12-20');
+});
+
+test('HR-first: target bpm per zona dari HR maks (easy 130–150, interval 164–175, race 164–173)', async () => {
+  const { hrRange } = await import('./hrZones.ts');
+  assert.deepEqual(hrRange('easy', 182), [130, 150]);
+  assert.deepEqual(hrRange('interval', 182), [164, 175]);
+  assert.deepEqual(hrRange('race', 182), [164, 173]);
+  assert.equal(hrRange('easy', 0), null);
+  const p = PROG();
+  const s = all(p);
+  assert.deepEqual(s.find((x) => x.kind === 'long')?.hr, [130, 150]);
+  assert.deepEqual(s.find((x) => x.zone === 'interval')?.hr, [164, 175]);
+  assert.deepEqual(s.find((x) => x.kind === 'race')?.hr, [164, 173]);
+  assert.equal(PROG({ maxHr: null }).weeks[0].sessions[0].hr, null);
+  const nike = buildPlan(opts({ maxHr: 190 }));
+  assert.ok(all(nike).filter((x) => x.zone).every((x) => x.hr != null));
+});
+
+test('Nike tetap tidak berubah secara struktur: id n*, 8 minggu puncak, tanpa tes', () => {
+  const p = buildPlan(opts({ raceIso: '2027-01-10' }));
+  assert.equal(p.weeks.length, 8);
+  assert.ok(all(p).filter((s) => s.kind !== 'race').every((s) => s.id.startsWith('n')));
+  assert.ok(all(p).every((s) => !s.test));
 });

@@ -105,3 +105,25 @@ Label statis "8 minggu lagi" dihapus. Tab **Program** kini memetakan rencana mun
 - Ringkasan total jarak per minggu.
 - Pace santai memakai satu sumber (Pace Chart kolom recovery bila ada, jika tidak zona Easy VDOT) sehingga jarak, durasi, dan pace konsisten.
 - Fase Base: volume awal minimal 10 km/minggu dan tiap Easy Run minimal 2 km (data 28 hari yang sangat sedikit tidak lagi menghasilkan lari 0,8 km). Angka ini asumsi (`MIN_BASE_WEEKLY_KM`, `MIN_EASY_KM`).
+
+## v2.2.0 — Smart Plan Selector & Hybrid Curriculum
+`nike5k.ts` tidak diubah. `src/analytics/`, `src/parsers/`, dan `src/db/` tidak disentuh pada versi ini (pilihan mode disimpan di `localStorage` `pacelab.planMode`, bukan di cadangan JSON).
+
+**Kurikulum Progresif 5K** (`src/plans/progressive5k.ts`): 11 minggu lari-jalan (L/J) + HR-first sesuai PDF program (Fondasi 1–4, Kecepatan & Daya Tahan 5–8, Spesifik Lomba & Taper 9–11; Tes 3K Sabtu minggu 4, Tes 5K Sabtu minggu 8). Skala: sisa > 11 minggu → minggu awal Base Building; sisa < 11 minggu → memakai N minggu terakhir (fase Fondasi sebagian dilewati, kartu memberi peringatan). Race 5K tepat di `targetRaceDate`; shake-out sehari sebelum lomba dipertahankan.
+
+**Pemilih** (`src/plans/planSelector.ts`, `selectBestPlan`): Progresif bila SALAH SATU — 5K terbaik/proyeksi ≥ 40:00; < 3 sesi/minggu (28 hari); HR rata-rata sesi Easy terakhir > 80% HR maks atau drift > 5%. Nike bila 5K < 40:00, ≥ 3 sesi/minggu, dan HR stabil. Mode `auto | progressive5k | nike5k` (default `auto`) dipilih lewat pill di atas tab Program, beserta alasan spesifik.
+
+**HR-first**: easy/long 71–82% HR maks, interval 90–96%, race 90–95% (dibulatkan ke atas; HR maks 182 → 130–150 / 164–175 / 164–173) ditampilkan di samping pace /km beserta instruksi "utamakan HR".
+
+**Kalibrasi Tes 3K**: sesi 2,8–3,2 km pada minggu tes dengan RPE ≥ 8 atau HR rata-rata ≥ 88% HR maks → proyeksi 5K = waktu 3K × 1,72; pace interval minggu berikutnya = pace 3K − 10–20 dtk/km (ulangan 400 m lebih dekat −20).
+
+**Rasio Long Run vs Easy**: Long Run ≥ Easy/Recovery terpanjang + 1,5 km ATAU + 15 menit (dinaikkan seperlunya). Easy Base dikunci 2,0–2,5 km; Easy Nike maks 30 menit. Bonus beban rendah (ACWR < 0,8, +10% maks +10 menit) kini hanya ke Long Run berikutnya.
+
+**Keputusan/asumsi yang perlu ditinjau**
+- Long Run minggu 3 Progresif = 51' (spesifikasi 50') agar selisih ≥ 15 menit dari sesi Tue 3×(10'L/2'J) = 36'.
+- Minggu deload (4 dan 8) dikecualikan dari aturan margin Long Run (long run sengaja ringan 30').
+- Kurikulum Progresif tidak mengunci Recovery ≤ 30 menit dan tidak memangkas taper lagi (durasinya sudah ditetapkan kurikulum).
+- Tes (Sabtu) boleh bersebelahan dengan Long Run Minggu karena Long Run setelahnya ringan; Speed biasa tetap tidak boleh.
+- 5K "terbaik" = yang tercepat antara proyeksi Riegel dan catatan 5K aktual (4,9–5,2 km). Tanpa sesi bertipe Easy, sesi terakhir dipakai (ditandai di alasan). Data HR kosong dianggap tidak melanggar; 5K tak terproyeksi → Progresif.
+- Zona `test` (88–95% HR maks) dan perkiraan durasi sesi interval/tes (pace nominal) adalah asumsi. Pace interval sebelum Tes 3K dicatat tidak ditampilkan (hanya HR dan "pace menuju PB").
+- Pace race pada kartu memakai target waktu di Profil; sesuaikan bila target Anda belum realistis.

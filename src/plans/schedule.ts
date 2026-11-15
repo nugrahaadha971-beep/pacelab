@@ -1,6 +1,11 @@
 // Penjadwalan kalender nyata mundur dari targetRaceDate. Murni (tanpa UI/DOM) agar bisa diuji dengan node:test.
 import { NIKE_5K_PLAN } from './nike5k.ts';
 import type { Session, SessionKind } from './nike5k.ts';
+import { PROGRESSIVE_5K, PROGRESSIVE_RACE_STEPS } from './progressive5k.ts';
+import { hrRange } from './hrZones.ts';
+import type { Zone } from './hrZones.ts';
+
+export type CurriculumId = 'nike5k' | 'progressive5k';
 
 export type IsoDate = string; // YYYY-MM-DD (kalender, tanpa zona waktu)
 export type Phase = 'base' | 'build' | 'taper' | 'race';
@@ -18,6 +23,13 @@ export const MIN_TRAINING_DAYS = 3;
 /** ASUMSI: volume awal Base minimal 10 km/minggu (data 28 hari yang sangat sedikit tidak dipakai mentah-mentah) dan tiap Easy Run minimal 2 km. */
 export const MIN_BASE_WEEKLY_KM = 10;
 export const MIN_EASY_KM = 2;
+/** Easy/Recovery Run dikunci pendek (Base: 2,0–2,5 km; Nike: maks 30 menit); Long Run ≥ Easy terpanjang + 1,5 km atau + 15 menit. */
+export const RECOVERY_MAX_KM = 2.5;
+export const RECOVERY_MAX_MIN = 30;
+export const LONG_MARGIN_KM = 1.5;
+export const LONG_MARGIN_MIN = 15;
+/** ASUMSI: Long Run fase Base tidak melebihi 40% volume mingguan (kecuali untuk memenuhi margin di atas). */
+const BASE_LONG_MAX_SHARE = 0.4;
 /** ASUMSI: persentase long run dari volume mingguan pada fase Base. */
 const BASE_LONG_SHARE = 0.35;
 /** ASUMSI: estimasi durasi sesi speed = jumlah langkah berdurasi, minimal 30 menit (termasuk pemanasan/recovery/pendinginan). */
@@ -143,6 +155,10 @@ export interface PlanSession {
   durationMin: number | null;
   note?: string;
   demoted?: boolean; // speed → easy karena tidak ada hari yang tidak bersebelahan dengan Long Run
+  zone?: Zone; // zona HR: easy (Easy/Long), interval, race, test
+  hr?: [number, number] | null; // target bpm dari HR maks
+  test?: '3k' | '5k';
+  repKm?: number; // jarak ulangan interval (km)
   // Diisi oleh adaptiveEngine
   adjDurationMin?: number;
   paceDeltaSec?: number; // + lebih lambat, − lebih cepat (detik/km)
@@ -156,6 +172,8 @@ export interface PlanWeek {
   startIso: IsoDate;
   endIso: IsoDate;
   plannedKm: number | null; // target volume mingguan (hanya fase Base)
+  title?: string; // judul fase kurikulum (mis. "Fondasi Lari-Jalan")
+  deload?: boolean;
   sessions: PlanSession[];
 }
 
@@ -175,6 +193,8 @@ export interface PlanOptions {
   startWeeklyKm: number;
   maxWeeklyKm: number;
   easyPaceSecPerKm: number;
+  curriculum?: CurriculumId; // default 'nike5k'
+  maxHr?: number | null; // untuk target bpm per sesi
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -208,11 +228,12 @@ export function sessionLoad(s: Pick<Session, 'kind' | 'name' | 'steps'>, easyPac
 const PRIORITY: Record<SessionKind, number> = { race: 4, long: 3, speed: 2, recovery: 1 };
 
 /** Pilih `n` sesi yang dipertahankan: buang prioritas terendah dulu (recovery), yang paling awal lebih dulu. Urutan asli dipertahankan. */
-export function pickSessions<T extends { kind: SessionKind }>(list: T[], n: number): number[] {
+export function pickSessions<T extends { kind: SessionKind; test?: unknown }>(list: T[], n: number): number[] {
+  const pr = (x: T) => (x.test ? 3 : PRIORITY[x.kind]);
   const idx = list.map((_, i) => i);
   while (idx.length > Math.max(0, n)) {
     let drop = 0;
-    for (let k = 1; k < idx.length; k++) if (PRIORITY[list[idx[k]].kind] < PRIORITY[list[idx[drop]].kind]) drop = k;
+    for (let k = 1; k < idx.length; k++) if (pr(list[idx[k]]) < pr(list[idx[drop]])) drop = k;
     idx.splice(drop, 1);
   }
   return idx;
@@ -229,7 +250,10 @@ function spreadSlots(slots: IsoDate[], n: number): IsoDate[] {
 const isWeekend = (iso: IsoDate) => { const w = weekdayOf(iso); return w === 0 || w === 6; };
 const adjacent = (a: IsoDate | null, b: IsoDate | null) => a != null && b != null && Math.abs(dayNum(a) - dayNum(b)) === 1;
 
-interface Draft { id: string; kind: SessionKind; name: string; steps: string[]; distanceKm: number | null; durationMin: number | null; demoted?: boolean }
+export interface Draft {
+  id: string; kind: SessionKind; name: string; steps: string[]; distanceKm: number | null; durationMin: number | null; demoted?: boolean;
+  zone?: Zone; test?: '3k' | '5k'; repKm?: number; fixedWeekday?: number;
+}
 interface Ctx { prevLong: IsoDate | null; prevSpeed: IsoDate | null }
 
 /**
@@ -256,9 +280,17 @@ export function assignWeek(drafts: Draft[], slotsAll: IsoDate[], ctx: Ctx): Arra
 
   const speedDates: IsoDate[] = [];
   const placed = new Map<Draft, IsoDate>();
-  for (const d of drafts.filter((x) => x.kind === 'speed')) {
-    const hardOk = free.filter((s) => !adjacent(s, longDate) && !adjacent(s, ctx.prevLong));
-    const soft = hardOk.filter((s) => !speedDates.some((p) => adjacent(s, p)));
+  // Tes (3K/5K) lebih dulu: ditaruh di hari tetapnya (Sabtu) dan boleh bersebelahan dengan Long Run karena Long Run setelahnya ringan.
+  const speeds = drafts.filter((x) => x.kind === 'speed').sort((a, b) => Number(!!b.test) - Number(!!a.test));
+  for (const d of speeds) {
+    if (d.test) {
+      const hardOk = free.filter((x) => !adjacent(x, longDate) && !adjacent(x, ctx.prevLong));
+      const pick = free.find((x) => weekdayOf(x) === d.fixedWeekday) ?? hardOk[0] ?? free[0];
+      if (pick) { take(pick); speedDates.push(pick); placed.set(d, pick); }
+      continue;
+    }
+    const hardOk = free.filter((x) => !adjacent(x, longDate) && !adjacent(x, ctx.prevLong));
+    const soft = hardOk.filter((x) => !speedDates.some((p) => adjacent(x, p)));
     const pick = (soft.length ? soft : hardOk)[0];
     if (pick) {
       take(pick);
@@ -272,7 +304,7 @@ export function assignWeek(drafts: Draft[], slotsAll: IsoDate[], ctx: Ctx): Arra
       if (dt) out.push({ draft: d, date: dt });
       else if (free.length) {
         const dt2 = free.shift() as IsoDate;
-        out.push({ draft: { ...d, kind: 'recovery', name: 'Easy Run (pengganti Speed)', steps: [], durationMin: Math.min(d.durationMin ?? 35, 35), demoted: true }, date: dt2 });
+        out.push({ draft: { ...d, kind: 'recovery', zone: 'easy', repKm: undefined, name: 'Easy Run (pengganti Speed)', steps: [], durationMin: Math.min(d.durationMin ?? 35, 35), demoted: true }, date: dt2 });
       }
     } else if (d.kind === 'recovery') {
       if (free.length) out.push({ draft: d, date: free.shift() as IsoDate });
@@ -290,62 +322,133 @@ export function baseVolumes(count: number, startKm: number, maxKm: number): numb
   return out;
 }
 
+interface TplSession {
+  key: number; kind: SessionKind; name: string; steps: string[]; zone: Zone; durationMin: number | null; distanceKm: number | null;
+  test?: '3k' | '5k'; repKm?: number; fixedWeekday?: number;
+}
+interface Tpl {
+  weeks: Array<{ title?: string; deload?: boolean; sessions: TplSession[] }>;
+  idPrefix: string;
+  capRecovery: boolean; // kunci Easy/Recovery ≤ 30 menit (templat Nike); kurikulum Progresif sudah menetapkan durasinya sendiri
+  taperCut: boolean; // pangkas minggu terakhir (templat Nike); Progresif sudah memuat taper sendiri
+  keepPreRaceDay: boolean; // Progresif memprogram shake-out sehari sebelum lomba
+  raceSteps: string[];
+}
+
+function template(c: CurriculumId, easyPace: number): Tpl {
+  if (c === 'progressive5k') {
+    return {
+      idPrefix: 'p', capRecovery: false, taperCut: false, keepPreRaceDay: true, raceSteps: PROGRESSIVE_RACE_STEPS,
+      weeks: PROGRESSIVE_5K.map((w) => ({
+        title: w.title, deload: w.deload,
+        sessions: w.sessions.map((x, key) => ({
+          ...x, key, distanceKm: x.kind === 'speed' ? null : round1((x.durationMin * 60) / easyPace),
+        })),
+      })),
+    };
+  }
+  return {
+    idPrefix: 'n', capRecovery: true, taperCut: true, keepPreRaceDay: false, raceSteps: [],
+    weeks: NIKE_5K_PLAN.map((w) => ({
+      sessions: w.sessions.flatMap((x, key): TplSession[] =>
+        x.kind === 'race' ? [] : [{ key, kind: x.kind, name: x.name, steps: x.steps, zone: x.kind === 'speed' ? 'interval' : 'easy', ...sessionLoad(x, easyPace) }]),
+    })),
+  };
+}
+
+const renameForMinutes = (name: string, min: number): string =>
+  name === 'Easy Run' || name === 'Long Run' ? name : /^\d+'/.test(name) ? name.replace(/^\d+'/, `${min}'`) : `${min} menit`;
+
+/**
+ * Kunci Easy/Recovery pendek dan pastikan Long Run lebih panjang: selisih ≥ 1,5 km ATAU ≥ 15 menit dari
+ * Easy/Recovery terpanjang di minggu yang sama (Long Run dinaikkan seperlunya). Minggu deload dikecualikan.
+ */
+export function enforceLongMargin(drafts: Draft[], easyPace: number, capRecovery: boolean, exempt = false): Draft[] {
+  let out = drafts.map((d) => ({ ...d }));
+  if (capRecovery) {
+    out = out.map((d) => {
+      if (d.kind !== 'recovery' || d.zone !== 'easy' || d.demoted || d.durationMin == null || d.durationMin <= RECOVERY_MAX_MIN) return d;
+      const km = d.distanceKm != null ? round1((d.distanceKm * RECOVERY_MAX_MIN) / d.durationMin) : null;
+      return { ...d, durationMin: RECOVERY_MAX_MIN, distanceKm: km, name: renameForMinutes(d.name, RECOVERY_MAX_MIN) };
+    });
+  }
+  if (exempt) return out;
+  const easy = out.filter((d) => d.kind === 'recovery' && d.zone === 'easy' && d.durationMin != null);
+  const li = out.findIndex((d) => d.kind === 'long' && d.durationMin != null);
+  if (li < 0 || !easy.length) return out;
+  const L = out[li];
+  const eMin = Math.max(...easy.map((d) => d.durationMin as number));
+  const eKm = Math.max(...easy.map((d) => d.distanceKm ?? ((d.durationMin as number) * 60) / easyPace));
+  const lMin = L.durationMin as number;
+  const lKm = L.distanceKm ?? (lMin * 60) / easyPace;
+  if (lMin - eMin >= LONG_MARGIN_MIN || lKm - eKm >= LONG_MARGIN_KM) return out;
+  const needMin = Math.ceil(Math.min(eMin + LONG_MARGIN_MIN, ((eKm + LONG_MARGIN_KM) * easyPace) / 60));
+  out[li] = { ...L, durationMin: needMin, distanceKm: round1((needMin * 60) / easyPace), name: renameForMinutes(L.name, needMin) };
+  return out;
+}
+
 export function buildPlan(o: PlanOptions): Plan {
   const { daysRemaining, weeksRemaining } = remaining(o.raceIso, o.todayIso);
   if (daysRemaining < 0) return { weeks: [], daysRemaining, weeksRemaining: 0, baseWeeks: 0, totalWeeks: 0 };
 
+  const tpl = template(o.curriculum ?? 'nike5k', o.easyPaceSecPerKm);
+  const tplWeeks = tpl.weeks.length;
   const total = Math.max(1, weeksRemaining);
-  const nikeCount = Math.min(NIKE_WEEKS, total);
-  const baseCount = total - nikeCount;
+  const peakCount = Math.min(tplWeeks, total);
+  const baseCount = total - peakCount;
   const volumes = baseVolumes(baseCount, Math.max(o.startWeeklyKm, MIN_BASE_WEEKLY_KM), o.maxWeeklyKm);
   const raceDay = o.raceIso;
   const weeks: PlanWeek[] = [];
   let ctx: Ctx = { prevLong: null, prevSpeed: null };
+  const marginKm = Math.max(LONG_MARGIN_KM, (LONG_MARGIN_MIN * 60) / o.easyPaceSecPerKm);
+  const withHr = (zone: Zone | undefined) => (zone ? hrRange(zone, o.maxHr) : null);
 
   for (let i = 0; i < total; i++) {
     const end = addDays(raceDay, -7 * (total - 1 - i));
     const start = addDays(end, -6);
     const isLast = i === total - 1;
     const isBase = i < baseCount;
-    const nikeIdx = NIKE_WEEKS - nikeCount + (i - baseCount);
+    const tIdx = tplWeeks - peakCount + (i - baseCount);
+    const tw = isBase ? null : tpl.weeks[tIdx];
 
     let slots: IsoDate[] = [];
     for (let d = Math.max(dayNum(start), dayNum(o.todayIso)); d <= dayNum(end); d++) {
       const iso = fromDayNum(d);
       if (o.days.includes(weekdayOf(iso)) && !(isLast && iso === raceDay)) slots.push(iso);
     }
-    // Minggu lomba: sisakan hari sebelum lomba untuk istirahat bila masih ada ≥ 2 slot lain.
-    if (isLast && slots.length > 2 && slots[slots.length - 1] === addDays(raceDay, -1)) slots = slots.slice(0, -1);
+    // Minggu lomba (templat tanpa shake-out): sisakan hari sebelum lomba untuk istirahat bila masih ada ≥ 2 slot lain.
+    if (isLast && !tpl.keepPreRaceDay && slots.length > 2 && slots[slots.length - 1] === addDays(raceDay, -1)) slots = slots.slice(0, -1);
 
     let drafts: Draft[];
-    const plannedKm = isBase ? volumes[i] : null;
+    let plannedKm: number | null = null;
     if (isBase) {
-      const nominal = o.days.length <= 1 ? 1 : Math.max(2, Math.min(o.days.length, 1 + Math.floor((volumes[i] * (1 - BASE_LONG_SHARE)) / MIN_EASY_KM)));
-      const longKm = nominal === 1 ? volumes[i] : round1(volumes[i] * BASE_LONG_SHARE);
-      const easyKm = nominal > 1 ? round1((volumes[i] - longKm) / (nominal - 1)) : 0;
+      const V = volumes[i];
+      const n = o.days.length <= 1 ? 1 : Math.max(2, Math.min(o.days.length, 1 + Math.floor((V * (1 - BASE_LONG_SHARE)) / MIN_EASY_KM)));
+      const easyKm = n > 1 ? Math.min(RECOVERY_MAX_KM, Math.max(MIN_EASY_KM, round1((V * (1 - BASE_LONG_SHARE)) / (n - 1)))) : 0;
+      const longKm = n === 1 ? V : round1(Math.max(easyKm + marginKm, Math.min(V - easyKm * (n - 1), V * BASE_LONG_MAX_SHARE)));
       const bj = baseCount - i; // b1 = minggu Base tepat sebelum blok puncak (id stabil seiring waktu)
       const mk = (kind: SessionKind, km: number, k: number): Draft => ({
-        id: `b${bj}-${k}`, kind, name: kind === 'long' ? 'Long Run' : 'Easy Run', steps: [],
+        id: `b${bj}-${k}`, kind, name: kind === 'long' ? 'Long Run' : 'Easy Run', steps: [], zone: 'easy',
         distanceKm: km, durationMin: Math.round((km * o.easyPaceSecPerKm) / 60),
       });
-      drafts = [...Array.from({ length: nominal - 1 }, (_, k) => mk('recovery', easyKm, k)), mk('long', longKm, nominal - 1)];
-      if (nominal === 1) drafts = [mk('long', longKm, 0)];
+      drafts = n === 1 ? [mk('long', longKm, 0)] : [...Array.from({ length: n - 1 }, (_, k) => mk('recovery', easyKm, k)), mk('long', longKm, n - 1)];
+      plannedKm = round1(easyKm * (n - 1) + longKm);
     } else {
-      drafts = [];
-      NIKE_5K_PLAN[nikeIdx].sessions.forEach((s, k) => {
-        if (s.kind === 'race') return;
-        drafts.push({ id: `n${nikeIdx}-${k}`, kind: s.kind, name: s.name, steps: s.steps, ...sessionLoad(s, o.easyPaceSecPerKm) });
-      });
+      drafts = (tw as NonNullable<typeof tw>).sessions.map((x) => ({
+        id: `${tpl.idPrefix}${tIdx}-${x.key}`, kind: x.kind, name: x.name, steps: x.steps, zone: x.zone,
+        distanceKm: x.distanceKm, durationMin: x.durationMin, test: x.test, repKm: x.repKm, fixedWeekday: x.fixedWeekday,
+      }));
     }
 
-    const keep = pickSessions(drafts, slots.length).map((k) => drafts[k]);
+    const picked = pickSessions(drafts, slots.length).map((k) => drafts[k]);
+    const keep = enforceLongMargin(picked, o.easyPaceSecPerKm, tpl.capRecovery && !isBase, !!tw?.deload);
     const placed = assignWeek(keep, slots, ctx);
     const phase: Phase = isBase ? 'base' : isLast ? 'taper' : 'build';
 
     const sessions: PlanSession[] = placed.map(({ draft, date }) => {
       let { durationMin, distanceKm, name } = draft;
       let note: string | undefined;
-      if (phase === 'taper') {
+      if (phase === 'taper' && tpl.taperCut) {
         const f = 1 - TAPER_CUT;
         if (durationMin != null) durationMin = Math.round(durationMin * f);
         if (distanceKm != null) distanceKm = round1(distanceKm * f);
@@ -355,20 +458,21 @@ export function buildPlan(o: PlanOptions): Plan {
       return {
         id: draft.id, weekNo: i + 1, phase, kind: draft.kind, name, steps: draft.steps,
         date, baseDate: date, distanceKm, durationMin, note, demoted: draft.demoted,
+        zone: draft.zone, hr: withHr(draft.zone), test: draft.test, repKm: draft.repKm,
       };
     });
 
     if (isLast) {
       sessions.push({
-        id: 'race', weekNo: i + 1, phase: 'race', kind: 'race', name: o.raceName, steps: [],
-        date: raceDay, baseDate: raceDay, distanceKm: null, durationMin: null,
+        id: 'race', weekNo: i + 1, phase: 'race', kind: 'race', name: o.raceName, steps: tpl.raceSteps,
+        date: raceDay, baseDate: raceDay, distanceKm: null, durationMin: null, zone: 'race', hr: withHr('race'),
       });
     }
 
     const longS = [...sessions].reverse().find((s) => s.kind === 'long');
     const speedS = [...sessions].reverse().find((s) => s.kind === 'speed');
     ctx = { prevLong: longS?.date ?? ctx.prevLong, prevSpeed: speedS?.date ?? null };
-    weeks.push({ weekNo: i + 1, phase, startIso: start, endIso: end, plannedKm, sessions });
+    weeks.push({ weekNo: i + 1, phase, startIso: start, endIso: end, plannedKm, title: tw?.title, deload: tw?.deload, sessions });
   }
   return { weeks, daysRemaining, weeksRemaining, baseWeeks: baseCount, totalWeeks: total };
 }

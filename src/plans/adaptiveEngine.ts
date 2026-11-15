@@ -1,8 +1,9 @@
 // Mesin penyesuaian program otomatis. Murni (tanpa UI) agar bisa diuji dengan node:test.
 import { acwr, cardiacDrift, DAY_MS, efficiencyFactor } from '../analytics/workload.ts';
 import type { UserProfile, Workout } from '../analytics/types.ts';
-import { dayNum } from './schedule.ts';
+import { dayNum, isoFromLocal } from './schedule.ts';
 import type { Adjustment, IsoDate, PlanSession } from './schedule.ts';
+import { hrRange } from './hrZones.ts';
 
 export const ACWR_HIGH = 1.3;
 export const ACWR_LOW = 0.8;
@@ -19,7 +20,7 @@ export const BADGE = {
   high_load: 'Disesuaikan: Beban Tinggi (ACWR)',
   ef_up: 'Target Pace Ditingkatkan (+Efisiensi)',
   drift: 'Pace Easy Diperlambat (Cardiac Drift)',
-  add_volume: 'Durasi Ditambah (Beban Rendah)',
+  add_volume: 'Durasi Long Run Ditambah (Beban Rendah)',
 } as const;
 
 // ───────────────────────── Progresi pace menuju target PB ─────────────────────────
@@ -118,15 +119,16 @@ const mins = (n: number) => `${Math.round(n)} menit`;
  *  1. ACWR > 1,3 → Speed berikutnya jadi Recovery Easy Run, durasi −20%. (Menang atas aturan 2.)
  *  2. EF terakhir ≥ rata-rata 14 hari +3% → pace Interval/Threshold (Speed berikutnya) −4 dtk/km.
  *  3. Drift > 5% → pace Easy Run berikutnya +12 dtk/km.
- *  4. ACWR < 0,8 dan drift ≤ 5% → Easy/Long Run berikutnya +10% (maks +10 menit).
+ *  4. ACWR < 0,8 dan drift ≤ 5% → Long Run berikutnya +10% (maks +10 menit); bonus tidak diberikan ke Recovery Run
+ *     agar Easy tetap pendek dan Long Run tetap jelas lebih panjang.
  */
-export function applyAdaptation(sessions: PlanSession[], d: AdaptiveDecision, todayIso: IsoDate, done: ReadonlySet<string>): AdaptationResult {
+export function applyAdaptation(sessions: PlanSession[], d: AdaptiveDecision, todayIso: IsoDate, done: ReadonlySet<string>, maxHr?: number | null): AdaptationResult {
   const upcoming = sessions
     .filter((s) => s.kind !== 'race' && dayNum(s.date) >= dayNum(todayIso) && !done.has(s.id))
     .sort((a, b) => dayNum(a.date) - dayNum(b.date));
   const nextSpeed = upcoming.find((s) => s.kind === 'speed');
   const nextEasy = upcoming.find((s) => s.kind === 'recovery');
-  const nextAerobic = upcoming.find((s) => s.kind === 'recovery' || s.kind === 'long');
+  const nextLong = upcoming.find((s) => s.kind === 'long');
 
   const patch = new Map<string, PlanSession>();
   const notes: AdaptationNote[] = [];
@@ -140,6 +142,7 @@ export function applyAdaptation(sessions: PlanSession[], d: AdaptiveDecision, to
     const base = nextSpeed.durationMin;
     edit(nextSpeed, (c) => ({
       ...c, kind: 'recovery', convertedFrom: 'speed', name: 'Recovery Easy Run', steps: [], note: undefined,
+      zone: 'easy', hr: hrRange('easy', maxHr), test: undefined, repKm: undefined,
       adjDurationMin: base != null ? base * (1 - HIGH_LOAD_CUT) : undefined,
     }));
     tag(nextSpeed, 'high_load', `ACWR di atas ${ACWR_HIGH}: sesi Speed diganti Recovery Easy Run${base != null ? `, durasi −${HIGH_LOAD_CUT * 100}% (${mins(base)} → ${mins(base * (1 - HIGH_LOAD_CUT))})` : ''}.`);
@@ -156,11 +159,55 @@ export function applyAdaptation(sessions: PlanSession[], d: AdaptiveDecision, to
     tag(nextEasy, 'drift', `Cardiac drift sesi terakhir di atas ${DRIFT_LIMIT_PCT}%: pace Easy +${EASY_SLOW_SEC} dtk/km agar tetap aerobik.`);
   }
 
-  if (d.addVolume && nextAerobic && nextAerobic.durationMin != null) {
-    const add = Math.min(VOLUME_ADD_MAX_MIN, nextAerobic.durationMin * VOLUME_ADD);
-    edit(nextAerobic, (c) => ({ ...c, adjDurationMin: (nextAerobic.durationMin as number) + add }));
-    tag(nextAerobic, 'add_volume', `Beban rendah (ACWR < ${ACWR_LOW}) dan drift ≤ ${DRIFT_LIMIT_PCT}%: durasi +${mins(add)} (${mins(nextAerobic.durationMin)} → ${mins(nextAerobic.durationMin + add)}).`);
+  if (d.addVolume && nextLong && nextLong.durationMin != null) {
+    const add = Math.min(VOLUME_ADD_MAX_MIN, nextLong.durationMin * VOLUME_ADD);
+    edit(nextLong, (c) => ({ ...c, adjDurationMin: (nextLong.durationMin as number) + add }));
+    tag(nextLong, 'add_volume', `Beban rendah (ACWR < ${ACWR_LOW}) dan drift ≤ ${DRIFT_LIMIT_PCT}%: durasi Long Run +${mins(add)} (${mins(nextLong.durationMin)} → ${mins(nextLong.durationMin + add)}).`);
   }
 
   return { sessions: sessions.map((s) => patch.get(s.id) ?? s), notes };
+}
+
+// ───────────────────────── Kalibrasi dari Tes 3K ─────────────────────────
+
+export const TEST3K_FACTOR = 1.72; // proyeksi 5K = waktu 3K × 1,72
+export const TEST3K_MIN_KM = 2.8;
+export const TEST3K_MAX_KM = 3.2;
+export const TEST_RPE_MIN = 8;
+export const TEST_HR_PCT = 0.88;
+
+export interface Test3kCalibration {
+  date: number;
+  time3kSec: number; // waktu dinormalkan ke tepat 3 km
+  pace3kSecPerKm: number;
+  proj5kSec: number;
+  pace5kSecPerKm: number;
+}
+
+/**
+ * Cari catatan Tes 3K pada minggu tes [startIso, endIso]: jarak 2,8–3,2 km dan intensitas keras
+ * (RPE ≥ 8 atau HR rata-rata ≥ 88% HR maks). Bila ada beberapa, dipakai yang tercepat.
+ * Waktu dinormalkan proporsional ke 3,0 km.
+ */
+export function calibrateFrom3k(workouts: Workout[], maxHr: number | null, startIso: IsoDate, endIso: IsoDate): Test3kCalibration | null {
+  let best: Test3kCalibration | null = null;
+  for (const w of workouts) {
+    const day = isoFromLocal(w.date);
+    if (dayNum(day) < dayNum(startIso) || dayNum(day) > dayNum(endIso)) continue;
+    if (w.distanceKm < TEST3K_MIN_KM || w.distanceKm > TEST3K_MAX_KM || w.durationSec <= 0) continue;
+    const hard = (w.rpe != null && w.rpe >= TEST_RPE_MIN) || (maxHr != null && maxHr > 0 && w.avgHr != null && w.avgHr >= TEST_HR_PCT * maxHr);
+    if (!hard) continue;
+    const t3 = (w.durationSec * 3) / w.distanceKm;
+    if (!best || t3 < best.time3kSec) {
+      const proj = t3 * TEST3K_FACTOR;
+      best = { date: w.date, time3kSec: t3, pace3kSecPerKm: t3 / 3, proj5kSec: proj, pace5kSecPerKm: proj / 5 };
+    }
+  }
+  return best;
+}
+
+/** Pace interval = pace 3K dikurangi 10–20 dtk/km (ulangan 400 m lebih dekat ke −20). Mengembalikan [tercepat, terlambat]. */
+export function intervalPaceRange(pace3kSecPerKm: number, repKm: number | undefined): [number, number] {
+  const [a, b] = repKm != null && repKm <= 0.4 ? [20, 15] : [15, 10];
+  return [pace3kSecPerKm - a, pace3kSecPerKm - b];
 }

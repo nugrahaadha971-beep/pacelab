@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import type { UserProfile, Workout } from '../analytics/types';
 import { PENALTY_RULES, RACE_KM } from '../analytics/predictor';
-import { applyAdaptation, evaluateAdaptation, gatherAdaptiveInput, weekPace } from '../plans/adaptiveEngine';
+import { applyAdaptation, calibrateFrom3k, evaluateAdaptation, gatherAdaptiveInput, intervalPaceRange, TEST3K_FACTOR, weekPace } from '../plans/adaptiveEngine';
+import { HR_FIRST_RULE, resolveMaxHr, ZONE_LABEL } from '../plans/hrZones';
+import { STRENGTH_NOTE } from '../plans/progressive5k';
 import { fmtKm, fmtPace, fmtRangeKm, nearestRow, paceKeyFor, paceSecPerKm } from '../plans/pace';
 import {
   addDays, applyScheduleState, autoCompleted, buildPlan, completedIds, dayNum, flattenPlan, formatDateId, formatDayMonth,
   isoFromLocal, isoFromRaceTs, MIN_BASE_WEEKLY_KM, MIN_TRAINING_DAYS, resetSchedule, setSessionDate, shiftAll, swapSessions, toggleDay, toggleDone,
   WEEKDAY_SHORT,
 } from '../plans/schedule';
-import type { Phase, PlanSession, ScheduleState } from '../plans/schedule';
+import type { CurriculumId, Phase, PlanSession, ScheduleState } from '../plans/schedule';
 import { loadScheduleState, saveScheduleState } from '../plans/scheduleStore';
 import { parseDuration } from '../parsers/manual';
 import { fmtDate, fmtHms, todayStr } from './format';
@@ -32,6 +34,8 @@ function loadSaved(): string | null {
   try { return localStorage.getItem(STORE_KEY); } catch { return null; }
 }
 
+const fmtRangeMinMax = ([fast, slow]: [number, number]) => `${fmtPace(fast)}–${fmtPace(slow)} /km`;
+
 interface Props {
   profile: UserProfile;
   workouts: Workout[];
@@ -40,9 +44,10 @@ interface Props {
   currentPaceSecPerKm: number | null;
   startWeeklyKm: number;
   easyPaceSecPerKm: number;
+  curriculum: CurriculumId;
 }
 
-export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentPaceSecPerKm, startWeeklyKm, easyPaceSecPerKm }: Props) {
+export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentPaceSecPerKm, startWeeklyKm, easyPaceSecPerKm, curriculum }: Props) {
   const [st, setSt] = useState<ScheduleState>(loadScheduleState);
   const [weekIdx, setWeekIdx] = useState(0);
   const [k5Text, setK5Text] = useState(() => loadSaved() ?? (defaultK5Sec != null ? fmtHms(defaultK5Sec) : ''));
@@ -60,6 +65,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const todayIso = todayStr();
   const raceIso = profile.targetRaceDate ? isoFromRaceTs(profile.targetRaceDate) : null;
   const targetPace = profile.targetTimeSec / RACE_KM[profile.targetDistance];
+  const maxHr = resolveMaxHr(profile, workouts);
   const maxWeeklyKm = profile.weeklyTargetKm ?? PENALTY_RULES[profile.targetDistance]?.weeklyKm ?? 50;
 
   const header = (
@@ -87,7 +93,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const easyPace = paceSecPerKm('rec', row) ?? easyPaceSecPerKm;
   const basePlan = buildPlan({
     raceIso, todayIso, days: st.days, raceName: `${profile.targetDistance} · Hari Lomba / Uji PB`,
-    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace,
+    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace, curriculum, maxHr,
   });
   const plan = applyScheduleState(basePlan, st, raceIso);
   const flat = flattenPlan(plan);
@@ -96,7 +102,13 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
 
   const gathered = gatherAdaptiveInput(workouts, profile, Date.now());
   const decision = evaluateAdaptation(gathered.input);
-  const adapted = applyAdaptation(flat, decision, todayIso, done);
+  const adapted = applyAdaptation(flat, decision, todayIso, done, maxHr);
+
+  // Kalibrasi Tes 3K (kurikulum Progresif): proyeksi 5K = waktu 3K × 1,72; pace interval minggu berikutnya = pace 3K − 10–20 dtk/km.
+  const test3k = flat.find((x) => x.test === '3k');
+  const testWeek = test3k ? plan.weeks[test3k.weekNo - 1] : undefined;
+  const calib = testWeek ? calibrateFrom3k(workouts, maxHr, testWeek.startIso, testWeek.endIso) : null;
+  const projPace = calib && profile.targetDistance === '5K' ? calib.pace5kSecPerKm : currentPaceSecPerKm;
   const byId = new Map(adapted.sessions.map((s) => [s.id, s]));
   const labelOf = (id: string) => { const s = byId.get(id); return s ? `${formatDayMonth(s.date)} · ${KIND_LABEL[s.kind]}` : id; };
 
@@ -104,9 +116,9 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const wi = Math.min(weekIdx, Math.max(0, plan.weeks.length - 1));
   const week = plan.weeks[wi];
   const goalPaceFor = (s: PlanSession): number | null =>
-    s.kind === 'race' ? targetPace : currentPaceSecPerKm == null ? null : weekPace(currentPaceSecPerKm, targetPace, s.weekNo, plan.totalWeeks);
+    s.kind === 'race' ? targetPace : projPace == null ? null : weekPace(projPace, targetPace, s.weekNo, plan.totalWeeks);
   const weekLabel = (w: (typeof plan.weeks)[number]) =>
-    `Minggu ${w.weekNo}/${plan.totalWeeks} · ${formatDayMonth(dayNum(w.startIso) < dayNum(todayIso) ? todayIso : w.startIso)}–${formatDayMonth(w.endIso)} · ${PHASE_LABEL[w.phase]}`;
+    `Minggu ${w.weekNo}/${plan.totalWeeks} · ${formatDayMonth(dayNum(w.startIso) < dayNum(todayIso) ? todayIso : w.startIso)}–${formatDayMonth(w.endIso)} · ${w.title ?? PHASE_LABEL[w.phase]}`;
 
   if (!week) {
     return <section className={card}>{header}<span className="text-sm text-slate-300">Tanggal lomba sudah lewat. Atur tanggal lomba baru di bagian atas tab ini.</span></section>;
@@ -128,8 +140,13 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
       {header}
       <span className="text-sm tabular-nums text-slate-300">
         {plan.daysRemaining} hari · {plan.weeksRemaining} minggu menuju {formatDateId(raceIso)}
-        {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak 8 minggu` : ''}
+        {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak ${curriculum === 'progressive5k' ? 11 : 8} minggu` : ''}
       </span>
+      {curriculum === 'progressive5k' && plan.totalWeeks < 11 && (
+        <span className="rounded-lg border border-amber-400/40 bg-amber-400/10 p-2 text-xs text-amber-300">
+          Tersisa {plan.totalWeeks} minggu (kurikulum penuh 11 minggu): minggu awal fase Fondasi dilewati, jadi pelan-pelan dan utamakan HR.
+        </span>
+      )}
 
       <details className="rounded-lg bg-navy-900 p-3 text-sm">
         <summary className="cursor-pointer font-semibold text-slate-300">Apa itu Easy, Recovery, dan Long Run?</summary>
@@ -137,12 +154,21 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
           <p><strong>Easy Run / Recovery Run</strong>: lari santai. Pace pelan, napas tenang, masih bisa ngobrol kalimat utuh. Fungsinya membangun daya tahan dan memulihkan kaki. Easy dan Recovery sama-sama santai, hanya beda tujuan; pace yang dipakai sama.</p>
           <p><strong>Long Run</strong>: lari paling panjang dalam seminggu, tetap pace santai. Yang dilatih daya tahan, bukan kecepatan.</p>
           <p><strong>Speed Run</strong>: sesi cepat (interval/tempo). Ada pemanasan, bagian cepat dengan pace tertentu, lalu pemulihan pelan.</p>
+          <p><strong>Lari-jalan (L/J)</strong>: 6×(3' Lari / 1' Jalan) artinya lari pelan 3 menit, jalan 1 menit, diulang 6 kali. <strong>Strides</strong>: 20 detik lari cepat tapi rileks, jalan 40 detik.</p>
+          <p><strong>HR-first</strong>: detak jantung adalah patokan utama; pace hanya perkiraan. Di cuaca panas HR naik, jadi perlambat atau jalan sampai HR turun.</p>
           <p className="text-xs text-slate-400">Setiap kartu menampilkan jarak (km) dan pace dalam menit per km. Pace santai ditampilkan sebagai rentang; lebih lambat sedikit tidak masalah, jangan lebih cepat.</p>
         </div>
       </details>
 
       <div className="rounded-lg border border-coral/40 bg-coral/5 p-3 text-sm">
         <div className="font-semibold">Penyesuaian Terbaru dari Sesi Terakhir</div>
+        {calib && (
+          <p className="mt-1 text-slate-200">
+            <span className={badge}>Kalibrasi Tes 3K</span>{' '}
+            3 km dalam {fmtHms(calib.time3kSec)} → proyeksi 5K = {fmtHms(calib.time3kSec)} × {String(TEST3K_FACTOR).replace('.', ',')} ≈ <strong>{fmtHms(calib.proj5kSec)}</strong>.
+            Pace interval minggu berikutnya {fmtRangeMinMax(intervalPaceRange(calib.pace3kSecPerKm, 0.6))}.
+          </p>
+        )}
         {!last ? (
           <p className="mt-1 text-slate-400">Belum ada sesi tercatat. Penyesuaian otomatis aktif setelah Anda mencatat latihan.</p>
         ) : (
@@ -216,6 +242,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
         const statusColor = isDone ? 'text-emerald-400' : status === 'Terlewat' ? 'text-amber-400' : status === 'Hari ini' ? 'text-coral' : 'text-slate-400';
         const delta = s.paceDeltaSec ?? 0;
         const easy = s.kind === 'recovery' || s.kind === 'long';
+        const calibPace = calib && test3k && s.zone === 'interval' && s.weekNo > test3k.weekNo ? intervalPaceRange(calib.pace3kSecPerKm, s.repKm) : null;
         const { min, km } = loadOf(s);
         const showName = s.name && s.kind !== 'race' && !['Easy Run', 'Long Run'].includes(s.name);
         const swapChoices = week.sessions.filter((o) => o.id !== s.id && o.kind !== 'race' && !done.has(o.id)).map((o) => byId.get(o.id) as PlanSession);
@@ -235,8 +262,18 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
               <div className="mt-1 rounded-lg bg-navy-900 p-2 text-sm tabular-nums">
                 <div>Jarak: <strong className="text-base">{km.toFixed(1)} km</strong> <span className="text-slate-400">(≈{Math.round(min)} menit)</span></div>
                 <div>Pace: <strong className="text-base text-emerald-400">{fmtRangeKm(easyPace + delta)}</strong></div>
+                {s.hr && <div>HR: <strong className="text-base text-emerald-400">{s.hr[0]}–{s.hr[1]} bpm</strong></div>}
               </div>
             )}
+            {!easy && s.hr && s.zone && (
+              <div className="mt-1 text-sm tabular-nums">{ZONE_LABEL[s.zone]}: HR <strong className="text-emerald-400">{s.hr[0]}–{s.hr[1]} bpm</strong>
+                {s.zone === 'interval' || s.zone === 'test' ? ' di akhir tiap ulangan' : ''}</div>
+            )}
+            {calibPace && <div className="text-sm tabular-nums">Pace ulangan (dari Tes 3K): <strong className="text-emerald-400">{fmtRangeMinMax(calibPace)}</strong></div>}
+            {s.hr && (
+              <div className="text-xs text-amber-300">{HR_FIRST_RULE}{s.zone === 'easy' ? ` Jalan sampai HR < ${s.hr[0]} bpm.` : ''}</div>
+            )}
+            {!s.hr && s.zone && <div className="text-xs text-slate-400">Isi HR maks di Profil untuk melihat target bpm.</div>}
             {s.kind === 'speed' && min != null && (
               <div className="mt-1 text-sm tabular-nums">Total ≈ <strong>{Math.round(min)} menit</strong> (termasuk pemanasan & pemulihan)</div>
             )}
@@ -249,7 +286,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
             </div>
             {s.note && <div className="text-xs text-slate-400">{s.note}</div>}
             {s.steps.map((stp, j) => {
-              const sec = paceSecPerKm(paceKeyFor(stp), row, delta);
+              const sec = curriculum === 'nike5k' ? paceSecPerKm(paceKeyFor(stp), row, delta) : null;
               return <div key={j} className="text-sm">{stp}{sec != null && <em className="text-emerald-400"> → {fmtKm(sec)}</em>}</div>;
             })}
             {gp != null && (s.kind === 'speed' || s.kind === 'race') && (
@@ -271,6 +308,15 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
           </div>
         );
       })}
+      {curriculum === 'progressive5k' && (
+        <details className="rounded-lg bg-navy-900 p-3 text-sm">
+          <summary className="cursor-pointer font-semibold text-slate-300">{STRENGTH_NOTE.title}</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
+            {STRENGTH_NOTE.moves.map((m) => <li key={m}>{m}</li>)}
+          </ul>
+          <p className="mt-2 text-xs text-slate-400">{STRENGTH_NOTE.how}</p>
+        </details>
+      )}
     </section>
   );
 }

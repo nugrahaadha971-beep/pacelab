@@ -1,12 +1,12 @@
 {
   "name": "pacelab-pwa",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test src/analytics/analytics.test.ts src/analytics/coach.test.ts src/plans/pace.test.ts src/parsers/fitParser.test.ts src/components/historyFilter.test.ts src/db/validate.test.ts src/plans/schedule.test.ts src/plans/adaptiveEngine.test.ts"
+    "test": "node --experimental-strip-types --test src/analytics/analytics.test.ts src/analytics/coach.test.ts src/plans/pace.test.ts src/parsers/fitParser.test.ts src/components/historyFilter.test.ts src/db/validate.test.ts src/plans/schedule.test.ts src/plans/adaptiveEngine.test.ts src/plans/planSelector.test.ts"
   },
   "dependencies": {
     "dexie": "^4.0.8",

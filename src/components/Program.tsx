@@ -5,6 +5,9 @@ import { currentVdot, PENALTY_RULES, penaltyPct, predictAll, RACE_KM, velocityFo
 import { fmtPace } from '../plans/pace';
 import { pbOutlook } from '../plans/adaptiveEngine';
 import { isoFromRaceTs, isValidIso, remaining } from '../plans/schedule';
+import { PLAN_LABEL, resolvePlan, selectBestPlan } from '../plans/planSelector';
+import type { PlanMode } from '../plans/planSelector';
+import { loadPlanMode, savePlanMode } from '../plans/scheduleStore';
 import { DAY_MS } from '../analytics/workload';
 import { fmtHms, todayStr } from './format';
 import TrainingPlan from './TrainingPlan';
@@ -26,6 +29,8 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
   const now = Date.now();
   const raceIso = profile.targetRaceDate ? isoFromRaceTs(profile.targetRaceDate) : null;
   const [raceText, setRaceText] = useState(raceIso ?? '');
+  const [mode, setMode] = useState<PlanMode>(loadPlanMode);
+  const chooseMode = (m: PlanMode) => { setMode(m); savePlanMode(m); };
   const saveRaceDate = async (v: string) => {
     setRaceText(v);
     if (v !== '' && !isValidIso(v)) return;
@@ -50,6 +55,9 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
   const vd = currentVdot(workouts, now);
   const zones = Object.keys(ZONE_FRACTION) as Zone[];
   const easyPace = vd != null ? 60000 / velocityFor(vd, ZONE_FRACTION.easy) : 360;
+  const selection = selectBestPlan(workouts, profile, { now, projected5kSec: preds['5K']?.finalSec ?? null });
+  const curriculum = resolvePlan(mode, selection);
+  const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
 
   return (
     <div className="space-y-4">
@@ -58,6 +66,28 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
       <label className={`${card} block text-sm`}>Tanggal lomba <span className="text-xs text-slate-400">(sinkron dengan Profil)</span>
         <input type="date" value={raceText} onChange={(e) => void saveRaceDate(e.target.value)} className={field} />
       </label>
+
+      <section className={card} aria-label="Rekomendasi Pelatih">
+        <div className="text-[11px] uppercase text-slate-400">Rekomendasi Pelatih untuk Kondisi Anda</div>
+        <div className="mt-1 font-semibold text-coral">
+          {mode === 'auto' ? 'Otomatis' : 'Pilihan Anda'}: {PLAN_LABEL[curriculum]}
+        </div>
+        {mode !== 'auto' && curriculum !== selection.plan && (
+          <p className="mt-1 text-xs text-amber-400">Rekomendasi otomatis untuk kondisi Anda saat ini: {PLAN_LABEL[selection.plan]}.</p>
+        )}
+        <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Pilih kurikulum">
+          {MODE_PILLS.map(([m, label]) => (
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => chooseMode(m)}
+              className={`rounded-full px-2 py-2 text-xs font-semibold ${mode === m ? 'bg-coral text-navy-900' : 'border border-navy-700 text-slate-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-300">
+          {selection.reasons.map((r, i) => <li key={i}>{r}</li>)}
+        </ul>
+        {target !== '5K' && <p className="mt-2 text-xs text-slate-400">Kedua kurikulum ini untuk 5K, sedangkan jarak target Anda {target}.</p>}
+      </section>
 
       <section className={card}>
         <div className="text-xs uppercase tracking-wide text-slate-400">Hitung mundur · {target}</div>
@@ -137,7 +167,7 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
         )}
       </section>
 
-      <TrainingPlan profile={profile} workouts={workouts} defaultK5Sec={preds['5K']?.finalSec ?? null} currentPaceSecPerKm={currentPace} startWeeklyKm={weeklyKm} easyPaceSecPerKm={easyPace} />
+      <TrainingPlan profile={profile} workouts={workouts} defaultK5Sec={preds['5K']?.finalSec ?? null} currentPaceSecPerKm={currentPace} startWeeklyKm={weeklyKm} easyPaceSecPerKm={easyPace} curriculum={curriculum} />
     </div>
   );
 }

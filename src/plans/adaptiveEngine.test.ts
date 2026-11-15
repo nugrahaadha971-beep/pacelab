@@ -5,6 +5,7 @@ import {
 } from './adaptiveEngine.ts';
 import type { AdaptiveDecision, AdaptiveInput } from './adaptiveEngine.ts';
 import { buildPlan, flattenPlan } from './schedule.ts';
+import { calibrateFrom3k, intervalPaceRange, TEST3K_FACTOR } from './adaptiveEngine.ts';
 import type { PlanSession } from './schedule.ts';
 import { targetForAdjusted, targetFor } from './pace.ts';
 import { DAY_MS } from '../analytics/workload.ts';
@@ -133,12 +134,22 @@ test('Aturan 3: drift > 5% → pace Easy Run berikutnya +12 dtk/km', () => {
   assert.equal(get(r, 'long1').paceDeltaSec, undefined);
 });
 
-test('Aturan 4: +10% durasi (maks +10 menit) pada Easy/Long Run berikutnya', () => {
+test('Aturan 4: +10% durasi (maks +10 menit) hanya pada Long Run berikutnya, bukan Recovery Run', () => {
   const r = applyAdaptation(list(), { ...none, addVolume: true }, TODAY, new Set());
-  assert.ok(Math.abs((get(r, 'rec1').adjDurationMin as number) - 44) < 1e-9);
-  assert.equal(get(r, 'long1').adjDurationMin, undefined);
-  const r2 = applyAdaptation(list(), { ...none, addVolume: true }, TODAY, new Set(['rec1']));
-  assert.equal(get(r2, 'long1').adjDurationMin, 130); // 10% dari 120 = 12 → dibatasi 10
+  assert.equal(get(r, 'rec1').adjDurationMin, undefined, 'Recovery tidak mendapat bonus');
+  assert.equal(get(r, 'long1').adjDurationMin, 130); // 10% dari 120 = 12 → dibatasi 10
+  assert.equal(r.notes.length, 1);
+  assert.equal(r.notes[0].sessionId, 'long1');
+  const short = list().map((s) => (s.id === 'long1' ? { ...s, durationMin: 40 } : s));
+  assert.ok(Math.abs((get(applyAdaptation(short, { ...none, addVolume: true }, TODAY, new Set()), 'long1').adjDurationMin as number) - 44) < 1e-9);
+  const noLong = applyAdaptation(list().filter((s) => s.kind !== 'long'), { ...none, addVolume: true }, TODAY, new Set());
+  assert.equal(noLong.notes.length, 0, 'tanpa Long Run mendatang tidak ada bonus');
+});
+
+test('Sesi Speed yang dialihkan menjadi Recovery mendapat zona HR mudah', () => {
+  const r = applyAdaptation(list(), { ...none, highLoad: true }, TODAY, new Set(), 182);
+  assert.equal(get(r, 'speed1').zone, 'easy');
+  assert.deepEqual(get(r, 'speed1').hr, [130, 150]);
 });
 
 test('Hari lomba tidak pernah diubah; tanpa aturan aktif tidak ada perubahan', () => {
@@ -184,4 +195,44 @@ test('alur lengkap: sesi terakhir EF naik + drift tinggi → rencana nyata mener
   const r = applyAdaptation(flattenPlan(plan), d, TODAY, new Set());
   const codes = r.notes.map((n) => n.code).sort();
   assert.deepEqual(codes, ['drift', 'ef_up']);
+});
+
+// ── Kalibrasi Tes 3K ───────────────────────────────────────────────────────────
+
+const day = (iso: string) => Date.parse(`${iso}T05:30:00`);
+const t3 = (iso: string, km: number, sec: number, o: Partial<Workout> = {}): Workout => wk(0, { date: day(iso), distanceKm: km, durationSec: sec, avgHr: null, rpe: null, ...o });
+
+test('Tes 3K: 3 km keras (RPE ≥ 8) → proyeksi 5K = waktu 3K × 1,72', () => {
+  const c = calibrateFrom3k([t3('2026-12-12', 3, 1530, { rpe: 8 })], 182, '2026-12-07', '2026-12-13');
+  assert.ok(c);
+  assert.equal(TEST3K_FACTOR, 1.72);
+  assert.ok(Math.abs(c.proj5kSec - 1530 * 1.72) < 1e-9); // 25:30 → ≈ 43:52
+  assert.equal(Math.round(c.proj5kSec), 2632);
+  assert.equal(c.pace3kSecPerKm, 510);
+  assert.ok(Math.abs(c.pace5kSecPerKm - (1530 * 1.72) / 5) < 1e-9);
+});
+
+test('Tes 3K: syarat jarak 2,8–3,2 km, intensitas (RPE ≥ 8 atau HR ≥ 88% HR maks), dan minggu tes', () => {
+  const W = ['2026-12-07', '2026-12-13'] as const;
+  assert.ok(calibrateFrom3k([t3('2026-12-12', 2.8, 1500, { rpe: 8 })], 182, ...W));
+  assert.ok(calibrateFrom3k([t3('2026-12-12', 3.2, 1700, { rpe: 8 })], 182, ...W));
+  assert.equal(calibrateFrom3k([t3('2026-12-12', 2.7, 1500, { rpe: 9 })], 182, ...W), null, 'terlalu pendek');
+  assert.equal(calibrateFrom3k([t3('2026-12-12', 3.3, 1500, { rpe: 9 })], 182, ...W), null, 'terlalu panjang');
+  assert.equal(calibrateFrom3k([t3('2026-12-12', 3, 1530, { rpe: 7 })], 182, ...W), null, 'RPE 7 tidak cukup');
+  assert.ok(calibrateFrom3k([t3('2026-12-12', 3, 1530, { avgHr: 161 })], 182, ...W), '88% × 182 = 160,2');
+  assert.equal(calibrateFrom3k([t3('2026-12-12', 3, 1530, { avgHr: 160 })], 182, ...W), null);
+  assert.equal(calibrateFrom3k([t3('2026-12-12', 3, 1530, { avgHr: 175 })], null, ...W), null, 'tanpa HR maks hanya RPE yang berlaku');
+  assert.equal(calibrateFrom3k([t3('2026-12-20', 3, 1530, { rpe: 9 })], 182, ...W), null, 'di luar minggu tes');
+});
+
+test('Tes 3K: waktu dinormalkan ke 3,0 km; bila ada beberapa dipakai yang tercepat', () => {
+  const c = calibrateFrom3k([t3('2026-12-12', 3.1, 1600, { rpe: 9 }), t3('2026-12-10', 3, 1700, { rpe: 9 })], 182, '2026-12-07', '2026-12-13');
+  assert.ok(Math.abs((c?.time3kSec ?? 0) - (1600 * 3) / 3.1) < 1e-9);
+});
+
+test('pace interval = pace 3K − 10–20 dtk/km (400 m lebih dekat 20)', () => {
+  assert.deepEqual(intervalPaceRange(510, 0.4), [490, 495]);
+  assert.deepEqual(intervalPaceRange(510, 0.6), [495, 500]);
+  assert.deepEqual(intervalPaceRange(510, 0.8), [495, 500]);
+  assert.deepEqual(intervalPaceRange(510, undefined), [495, 500]);
 });
