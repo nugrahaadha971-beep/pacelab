@@ -205,3 +205,14 @@ test('cadangan JSON: jadwal ikut diekspor/diimpor lewat parseBackup', () => {
   assert.deepEqual(r.schedule, st);
   assert.equal(parseBackup({ app: 'pacelab', workouts: [] }).schedule, null);
 });
+
+test('Base: data volume sangat kecil tidak menghasilkan lari mini; Easy Run ≥ 2 km, volume awal ≥ 10 km', async () => {
+  const { MIN_BASE_WEEKLY_KM, MIN_EASY_KM } = await import('./schedule.ts');
+  for (const days of [[2, 4, 6, 0], [1, 2, 3, 4, 5, 6, 0], [3, 6]]) {
+    const p = buildPlan(opts({ days, startWeeklyKm: 2.5 }));
+    assert.equal(p.weeks[0].plannedKm, MIN_BASE_WEEKLY_KM);
+    for (const s of p.weeks.filter((w) => w.phase === 'base').flatMap((w) => w.sessions)) {
+      if (s.kind === 'recovery') assert.ok((s.distanceKm as number) >= MIN_EASY_KM - 0.05, `${days}: Easy ${s.distanceKm} km`);
+    }
+  }
+});

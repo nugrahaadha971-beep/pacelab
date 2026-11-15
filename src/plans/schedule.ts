@@ -15,6 +15,9 @@ export const NIKE_WEEKS = NIKE_5K_PLAN.length; // 8
 export const BASE_GROWTH = 0.1; // maks +10%/minggu pada fase Base Building
 export const TAPER_CUT = 0.35; // pemangkasan volume minggu terakhir (rentang yang diminta: 30–40%)
 export const MIN_TRAINING_DAYS = 3;
+/** ASUMSI: volume awal Base minimal 10 km/minggu (data 28 hari yang sangat sedikit tidak dipakai mentah-mentah) dan tiap Easy Run minimal 2 km. */
+export const MIN_BASE_WEEKLY_KM = 10;
+export const MIN_EASY_KM = 2;
 /** ASUMSI: persentase long run dari volume mingguan pada fase Base. */
 const BASE_LONG_SHARE = 0.35;
 /** ASUMSI: estimasi durasi sesi speed = jumlah langkah berdurasi, minimal 30 menit (termasuk pemanasan/recovery/pendinginan). */
@@ -294,8 +297,7 @@ export function buildPlan(o: PlanOptions): Plan {
   const total = Math.max(1, weeksRemaining);
   const nikeCount = Math.min(NIKE_WEEKS, total);
   const baseCount = total - nikeCount;
-  const volumes = baseVolumes(baseCount, o.startWeeklyKm, o.maxWeeklyKm);
-  const nominal = Math.max(1, o.days.length);
+  const volumes = baseVolumes(baseCount, Math.max(o.startWeeklyKm, MIN_BASE_WEEKLY_KM), o.maxWeeklyKm);
   const raceDay = o.raceIso;
   const weeks: PlanWeek[] = [];
   let ctx: Ctx = { prevLong: null, prevSpeed: null };
@@ -318,6 +320,7 @@ export function buildPlan(o: PlanOptions): Plan {
     let drafts: Draft[];
     const plannedKm = isBase ? volumes[i] : null;
     if (isBase) {
+      const nominal = o.days.length <= 1 ? 1 : Math.max(2, Math.min(o.days.length, 1 + Math.floor((volumes[i] * (1 - BASE_LONG_SHARE)) / MIN_EASY_KM)));
       const longKm = nominal === 1 ? volumes[i] : round1(volumes[i] * BASE_LONG_SHARE);
       const easyKm = nominal > 1 ? round1((volumes[i] - longKm) / (nominal - 1)) : 0;
       const bj = baseCount - i; // b1 = minggu Base tepat sebelum blok puncak (id stabil seiring waktu)

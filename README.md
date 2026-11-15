@@ -98,3 +98,10 @@ Label statis "8 minggu lagi" dihapus. Tab **Program** kini memetakan rencana mun
 - Blok puncak tetap templat Nike 5K walau jarak target lain; hint pace chart mengikuti input 5K, dan pace target PB mengikuti jarak target. Volume akhir Base bisa jauh di atas volume minggu pertama Nike; itu sifat templatnya.
 - `PB` di sini = proyeksi Riegel saat ini (aplikasi belum menyimpan PB terpisah).
 - `tsconfig.json`: `allowImportingTsExtensions` diaktifkan agar modul yang diuji lewat `node --experimental-strip-types` bisa saling impor.
+
+## v2.1.1 — kartu latihan lebih jelas
+- Setiap sesi Easy/Recovery/Long menampilkan **jarak (km)** dan **rentang pace (menit/km)**; sesi Speed menampilkan pace per langkah dalam /km. Mil tidak lagi ditampilkan.
+- Penjelasan singkat tiap jenis latihan di kartu + kamus "Apa itu Easy, Recovery, dan Long Run?".
+- Ringkasan total jarak per minggu.
+- Pace santai memakai satu sumber (Pace Chart kolom recovery bila ada, jika tidak zona Easy VDOT) sehingga jarak, durasi, dan pace konsisten.
+- Fase Base: volume awal minimal 10 km/minggu dan tiap Easy Run minimal 2 km (data 28 hari yang sangat sedikit tidak lagi menghasilkan lari 0,8 km). Angka ini asumsi (`MIN_BASE_WEEKLY_KM`, `MIN_EASY_KM`).

@@ -47,3 +47,16 @@ export function targetForAdjusted(key: PaceKey | null, row: number[] | null, del
   const sec = row[COL[key]] + deltaSecPerKm * 1.609344;
   return `${fmtPace(sec)}/mi · ${fmtPace(sec / 1.609344)}/km`;
 }
+
+const MI = 1.609344;
+/** Pace dalam detik/km dari kolom Pace Chart (+ geser deltaSecPerKm). */
+export function paceSecPerKm(key: PaceKey | null, row: number[] | null, deltaSecPerKm = 0): number | null {
+  if (!key || key === 'best' || !row) return null;
+  return row[COL[key]] / MI + deltaSecPerKm;
+}
+/** "5:45 /km" untuk satu pace. */
+export const fmtKm = (secPerKm: number): string => `${fmtPace(secPerKm)} /km`;
+/** Rentang pace santai, mis. "8:46–9:16 /km". */
+export function fmtRangeKm(centerSecPerKm: number, spread = 15): string {
+  return `${fmtPace(centerSecPerKm - spread)}–${fmtPace(centerSecPerKm + spread)} /km`;
+}

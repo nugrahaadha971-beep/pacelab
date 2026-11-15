@@ -29,3 +29,13 @@ test('rencana: 8 minggu, Hari-H di minggu terakhir', () => {
   assert.equal(NIKE_5K_PLAN.length, 8);
   assert.equal(NIKE_5K_PLAN[7].sessions.at(-1)?.kind, 'race');
 });
+
+test('pace per km: konversi dari mil, delta, dan rentang', async () => {
+  const { paceSecPerKm, fmtKm, fmtRangeKm } = await import('./pace.ts');
+  const row = [420, 1425, 460, 475, 495, 560];
+  assert.equal(fmtKm(paceSecPerKm('k5', row) as number), '4:46 /km');
+  assert.equal(fmtKm(paceSecPerKm('k5', row, -4) as number), '4:42 /km');
+  assert.equal(paceSecPerKm('best', row), null);
+  assert.equal(paceSecPerKm(null, row), null);
+  assert.equal(fmtRangeKm(360), '5:45–6:15 /km');
+});

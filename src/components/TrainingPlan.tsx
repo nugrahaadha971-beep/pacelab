@@ -2,10 +2,10 @@ import { useState } from 'react';
 import type { UserProfile, Workout } from '../analytics/types';
 import { PENALTY_RULES, RACE_KM } from '../analytics/predictor';
 import { applyAdaptation, evaluateAdaptation, gatherAdaptiveInput, weekPace } from '../plans/adaptiveEngine';
-import { fmtPace, nearestRow, paceKeyFor, targetFor, targetForAdjusted } from '../plans/pace';
+import { fmtKm, fmtPace, fmtRangeKm, nearestRow, paceKeyFor, paceSecPerKm } from '../plans/pace';
 import {
   addDays, applyScheduleState, autoCompleted, buildPlan, completedIds, dayNum, flattenPlan, formatDateId, formatDayMonth,
-  isoFromLocal, isoFromRaceTs, MIN_TRAINING_DAYS, resetSchedule, setSessionDate, shiftAll, swapSessions, toggleDay, toggleDone,
+  isoFromLocal, isoFromRaceTs, MIN_BASE_WEEKLY_KM, MIN_TRAINING_DAYS, resetSchedule, setSessionDate, shiftAll, swapSessions, toggleDay, toggleDone,
   WEEKDAY_SHORT,
 } from '../plans/schedule';
 import type { Phase, PlanSession, ScheduleState } from '../plans/schedule';
@@ -13,7 +13,13 @@ import { loadScheduleState, saveScheduleState } from '../plans/scheduleStore';
 import { parseDuration } from '../parsers/manual';
 import { fmtDate, fmtHms, todayStr } from './format';
 
-const KIND_LABEL: Record<PlanSession['kind'], string> = { recovery: 'Recovery Run', speed: 'Speed Run', long: 'Long Run', race: 'Hari Lomba' };
+const KIND_LABEL: Record<PlanSession['kind'], string> = { recovery: 'Easy / Recovery Run', speed: 'Speed Run', long: 'Long Run', race: 'Hari Lomba' };
+const KIND_HINT: Record<PlanSession['kind'], string> = {
+  recovery: 'Lari santai: napas tenang, masih bisa ngobrol. Jangan dipercepat walau terasa terlalu mudah.',
+  long: 'Lari terpanjang minggu ini. Pace santai, sama seperti Easy Run. Boleh jeda jalan kaki bila perlu.',
+  speed: 'Lari cepat berinterval. Ikuti pace tiap langkah; sela pemulihan dilakukan dengan lari/jalan pelan.',
+  race: 'Hari uji PB: lari dengan target pace PB di bawah.',
+};
 const PHASE_LABEL: Record<Phase, string> = { base: 'Base Building', build: 'Build', taper: 'Taper', race: 'Lomba' };
 const STORE_KEY = 'pacelab.k5';
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Sen … Min
@@ -64,7 +70,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
       </label>
       {fromPrediction && <span className="text-xs text-slate-400">Terisi dari prediksi Riegel Anda. Ubah bila punya hasil 5K terbaru.</span>}
       {k5Text && k5 == null && <span className="text-sm text-coral">Format waktu tidak valid.</span>}
-      {row && <span className="text-sm tabular-nums">Baris Pace Chart: 5K {fmtPace(row[1])} · Mile best {fmtPace(row[0])}/mi</span>}
+      {row && <span className="text-sm tabular-nums">Baris Pace Chart: 5K {fmtPace(row[1])} · pace tercepat {fmtKm(row[0] / 1.609344)}</span>}
     </>
   );
 
@@ -77,9 +83,11 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
     );
   }
 
+  // Satu sumber pace santai: Pace Chart (kolom recovery) bila ada, jika tidak zona Easy VDOT.
+  const easyPace = paceSecPerKm('rec', row) ?? easyPaceSecPerKm;
   const basePlan = buildPlan({
     raceIso, todayIso, days: st.days, raceName: `${profile.targetDistance} · Hari Lomba / Uji PB`,
-    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm,
+    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace,
   });
   const plan = applyScheduleState(basePlan, st, raceIso);
   const flat = flattenPlan(plan);
@@ -106,6 +114,14 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
 
   const { last } = gathered;
   const lastIn = gathered.input;
+  /** Durasi & jarak yang ditampilkan (sudah memperhitungkan penyesuaian adaptif). */
+  const loadOf = (s: PlanSession): { min: number | null; km: number | null } => {
+    const min = s.adjDurationMin ?? s.durationMin;
+    if (min == null || s.kind === 'speed' || s.kind === 'race') return { min, km: null };
+    const km = s.distanceKm != null && s.durationMin ? (s.distanceKm * min) / s.durationMin : (min * 60) / easyPace;
+    return { min, km };
+  };
+  const weekKm = week.sessions.reduce((sum, r) => sum + (loadOf(byId.get(r.id) as PlanSession).km ?? 0), 0);
 
   return (
     <section className={card}>
@@ -114,6 +130,16 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
         {plan.daysRemaining} hari · {plan.weeksRemaining} minggu menuju {formatDateId(raceIso)}
         {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak 8 minggu` : ''}
       </span>
+
+      <details className="rounded-lg bg-navy-900 p-3 text-sm">
+        <summary className="cursor-pointer font-semibold text-slate-300">Apa itu Easy, Recovery, dan Long Run?</summary>
+        <div className="mt-2 space-y-2 text-slate-300">
+          <p><strong>Easy Run / Recovery Run</strong>: lari santai. Pace pelan, napas tenang, masih bisa ngobrol kalimat utuh. Fungsinya membangun daya tahan dan memulihkan kaki. Easy dan Recovery sama-sama santai, hanya beda tujuan; pace yang dipakai sama.</p>
+          <p><strong>Long Run</strong>: lari paling panjang dalam seminggu, tetap pace santai. Yang dilatih daya tahan, bukan kecepatan.</p>
+          <p><strong>Speed Run</strong>: sesi cepat (interval/tempo). Ada pemanasan, bagian cepat dengan pace tertentu, lalu pemulihan pelan.</p>
+          <p className="text-xs text-slate-400">Setiap kartu menampilkan jarak (km) dan pace dalam menit per km. Pace santai ditampilkan sebagai rentang; lebih lambat sedikit tidak masalah, jangan lebih cepat.</p>
+        </div>
+      </details>
 
       <div className="rounded-lg border border-coral/40 bg-coral/5 p-3 text-sm">
         <div className="font-semibold">Penyesuaian Terbaru dari Sesi Terakhir</div>
@@ -173,7 +199,13 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
         className="w-full rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-slate-100">
         {plan.weeks.map((w, i) => <option key={w.weekNo} value={i}>{weekLabel(w)}</option>)}
       </select>
-      {week.plannedKm != null && <span className="text-xs text-slate-400">Target volume Base minggu ini: {week.plannedKm} km (naik maks +10%/minggu)</span>}
+      {week.plannedKm != null && (
+        <span className="text-xs text-slate-400">
+          Target volume Base minggu ini: {week.plannedKm} km (naik maks +10%/minggu).
+          {startWeeklyKm < MIN_BASE_WEEKLY_KM ? ` Data 28 hari terakhir hanya ${startWeeklyKm.toFixed(1)} km/minggu, jadi volume awal dipatok minimal ${MIN_BASE_WEEKLY_KM} km. Kurangi hari latihan bila terasa berat.` : ''}
+        </span>
+      )}
+      {weekKm > 0 && <span className="text-sm tabular-nums text-slate-300">Total jarak lari santai + long run minggu ini: <strong>≈{weekKm.toFixed(1)} km</strong>{week.sessions.some((x) => x.kind === 'speed') ? ' (belum termasuk sesi Speed)' : ''}</span>}
 
       {week.sessions.map((raw) => {
         const s = byId.get(raw.id) as PlanSession;
@@ -183,8 +215,9 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
         const status = isDone ? 'Selesai' : dayNum(s.date) < dayNum(todayIso) ? 'Terlewat' : s.date === todayIso ? 'Hari ini' : 'Mendatang';
         const statusColor = isDone ? 'text-emerald-400' : status === 'Terlewat' ? 'text-amber-400' : status === 'Hari ini' ? 'text-coral' : 'text-slate-400';
         const delta = s.paceDeltaSec ?? 0;
-        const hint = s.kind === 'race' ? (profile.targetDistance === '5K' ? targetFor('k5', row) : null)
-          : s.kind === 'recovery' || s.kind === 'long' ? targetForAdjusted('rec', row, delta) : null;
+        const easy = s.kind === 'recovery' || s.kind === 'long';
+        const { min, km } = loadOf(s);
+        const showName = s.name && s.kind !== 'race' && !['Easy Run', 'Long Run'].includes(s.name);
         const swapChoices = week.sessions.filter((o) => o.id !== s.id && o.kind !== 'race' && !done.has(o.id)).map((o) => byId.get(o.id) as PlanSession);
         return (
           <div key={s.id} className="border-t border-navy-700 pt-2">
@@ -195,26 +228,34 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
                 {status}{auto ? ' (otomatis)' : ''}
               </label>
             </div>
-            <strong>{s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${s.name && s.kind !== 'race' ? ` · ${s.name}` : ''}`}</strong>
+            <strong>{s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`}</strong>
+            <div className="text-xs text-slate-400">{KIND_HINT[s.kind]}</div>
             {s.kind === 'race' && <div className="text-sm">{s.name}</div>}
-            {s.demoted && <div className="text-xs text-slate-400">Speed diganti Easy Run: tidak ada hari yang tidak bersebelahan dengan Long Run.</div>}
-            <div className="mt-1 flex flex-wrap gap-1">
-              {(s.adjustments ?? []).map((a) => <span key={a.code} className={badge}>{a.badge}</span>)}
-            </div>
-            {s.phase === 'base' && s.distanceKm != null && s.adjDurationMin == null && (
-              <div className="text-sm tabular-nums">{s.distanceKm} km · ≈{s.durationMin} menit</div>
+            {easy && km != null && min != null && (
+              <div className="mt-1 rounded-lg bg-navy-900 p-2 text-sm tabular-nums">
+                <div>Jarak: <strong className="text-base">{km.toFixed(1)} km</strong> <span className="text-slate-400">(≈{Math.round(min)} menit)</span></div>
+                <div>Pace: <strong className="text-base text-emerald-400">{fmtRangeKm(easyPace + delta)}</strong></div>
+              </div>
+            )}
+            {s.kind === 'speed' && min != null && (
+              <div className="mt-1 text-sm tabular-nums">Total ≈ <strong>{Math.round(min)} menit</strong> (termasuk pemanasan & pemulihan)</div>
             )}
             {s.adjDurationMin != null && s.durationMin != null && (
               <div className="text-sm tabular-nums text-coral">Durasi disesuaikan: {Math.round(s.durationMin)} → {Math.round(s.adjDurationMin)} menit</div>
             )}
+            {s.demoted && <div className="text-xs text-slate-400">Speed diganti Easy Run: tidak ada hari yang tidak bersebelahan dengan Long Run.</div>}
+            <div className="mt-1 flex flex-wrap gap-1">
+              {(s.adjustments ?? []).map((a) => <span key={a.code} className={badge}>{a.badge}</span>)}
+            </div>
             {s.note && <div className="text-xs text-slate-400">{s.note}</div>}
             {s.steps.map((stp, j) => {
-              const t = targetForAdjusted(paceKeyFor(stp), row, delta);
-              return <div key={j} className="text-sm">{stp}{t && <em className="text-emerald-400"> → {t}</em>}</div>;
+              const sec = paceSecPerKm(paceKeyFor(stp), row, delta);
+              return <div key={j} className="text-sm">{stp}{sec != null && <em className="text-emerald-400"> → {fmtKm(sec)}</em>}</div>;
             })}
-            {hint && <div className="text-sm text-emerald-400">Target: {hint}</div>}
             {gp != null && (s.kind === 'speed' || s.kind === 'race') && (
-              <div className="text-sm tabular-nums text-slate-300">Pace menuju PB {profile.targetDistance}: <span className="font-semibold">{fmtPace(gp)} /km</span></div>
+              <div className="text-sm tabular-nums text-slate-300">
+                {s.kind === 'race' ? 'Target pace PB' : `Pace menuju PB ${profile.targetDistance}`}: <span className="font-semibold">{fmtKm(gp)}</span>
+              </div>
             )}
             {s.kind !== 'race' && (
               <div className="mt-2 grid grid-cols-2 gap-2">
