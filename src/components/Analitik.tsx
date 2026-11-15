@@ -43,29 +43,32 @@ export default function Analitik({ profile, workouts }: { profile: UserProfile; 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Analitik</h1>
-      <Card title="Beban akut : kronis (ACWR)">
+      <Card title="Rasio beban (ACWR)">
         <AcwrGauge ratio={current.ratio} status={current.status} />
-        <p className="mt-2 text-center text-xs tabular-nums text-slate-400">
-          Akut 7 hari {Math.round(current.acute)} · Kronis (rata-rata mingguan) {Math.round(current.chronicWeekly)}
+        <p className="mt-2 text-center text-sm tabular-nums text-slate-400">
+          Beban 7 hari {Math.round(current.acute)} · Rata-rata mingguan sebelumnya {Math.round(current.chronicWeekly)}
         </p>
+        <p className="mt-1 text-center text-xs text-slate-400">Rasio antara 0,8 dan 1,3 dianggap aman.</p>
       </Card>
 
-      <div className="grid grid-cols-3 gap-2 rounded-xl bg-navy-800 p-1">
+      <div role="group" aria-label="Rentang waktu grafik" className="grid grid-cols-3 gap-1 rounded-2xl bg-navy-800 p-1">
         {RANGES.map((r) => (
-          <button key={r} onClick={() => setDays(r)}
-            className={`rounded-lg py-2 text-sm font-semibold ${days === r ? 'bg-coral text-navy-900' : 'text-slate-300'}`}>
-            {r} Hari
+          <button key={r} type="button" aria-pressed={days === r} onClick={() => setDays(r)}
+            className={`min-h-11 rounded-xl text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
+              days === r ? 'bg-gradient-to-r from-coral to-orange-400 text-navy-900' : 'text-slate-300'
+            }`}>
+            {r} hari
           </button>
         ))}
       </div>
 
       {inRange.length === 0 ? (
         <p className="rounded-xl bg-navy-800 p-6 text-center text-sm text-slate-400">
-          Belum ada sesi dalam {days} hari terakhir. Impor atau catat sesi di Beranda.
+          Belum ada sesi dalam {days} hari terakhir. Ketuk tombol + di pojok kanan bawah untuk mencatat sesi.
         </p>
       ) : (
         <>
-          <Card title={`ACWR · ${days} hari`}>
+          <Card title={`Rasio beban (ACWR) · ${days} hari`}>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={acwrData}>
                 <CartesianGrid stroke="#1d2a40" vertical={false} />
@@ -76,8 +79,9 @@ export default function Analitik({ profile, workouts }: { profile: UserProfile; 
                 <Line dataKey="acwr" stroke="#ff6b5e" dot={false} connectNulls strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
+            <p className="mt-1 text-xs text-slate-400">Area hijau (0,8–1,3) adalah rentang aman. Garis di dalam area itu berarti beban seimbang.</p>
           </Card>
-          <Card title={`Efisiensi Aerobik · ${days} hari`}>
+          <Card title={`Efisiensi aerobik (EF) · ${days} hari`}>
             {efData.length === 0 ? (
               <p className="text-sm text-slate-400">Belum ada sesi easy atau long run dalam rentang ini.</p>
             ) : (
@@ -106,7 +110,7 @@ export default function Analitik({ profile, workouts }: { profile: UserProfile; 
         </>
       )}
 
-      <Card title="Proyeksi Riegel">
+      <Card title="Prediksi waktu lomba (Riegel)">
         <div className="divide-y divide-navy-700 tabular-nums">
           {dists.map((d) => {
             const p = preds[d];

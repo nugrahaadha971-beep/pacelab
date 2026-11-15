@@ -11,22 +11,43 @@ import { loadPlanMode, savePlanMode } from '../plans/scheduleStore';
 import { DAY_MS } from '../analytics/workload';
 import { fmtHms, todayStr } from './format';
 import TrainingPlan from './TrainingPlan';
+import { Field, StatCard, Tabs } from './ui';
 
 type Zone = keyof typeof ZONE_FRACTION;
-const card = 'rounded-xl bg-navy-800 p-4';
-const field = 'mt-1 w-full rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 tabular-nums text-slate-100 focus:border-coral focus:outline-none';
+type ProgramTab = 'ringkasan' | 'jadwal';
+const PROGRAM_TABS: ReadonlyArray<{ id: ProgramTab; label: string }> = [
+  { id: 'ringkasan', label: 'Ringkasan' },
+  { id: 'jadwal', label: 'Jadwal' },
+];
+const card = 'rounded-2xl border border-white/5 bg-navy-800 p-4';
 const ZONE_NAME: Record<Zone, string> = { easy: 'Easy', marathon: 'Marathon', threshold: 'Threshold', interval: 'Interval' };
+const ZONE_HINT: Record<Zone, string> = {
+  easy: 'Santai, masih bisa ngobrol',
+  marathon: 'Stabil untuk jarak jauh',
+  threshold: 'Keras tapi terkendali',
+  interval: 'Cepat, per ulangan',
+};
+const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
 
-function ProgressBar({ ratio }: { ratio: number }) {
+/** Bar progres dengan semantik progressbar; hijau bila sudah memenuhi syarat. */
+function Meter({ label, ratio }: { label: string; ratio: number }) {
+  const r = Math.min(1, Math.max(0, ratio));
   return (
-    <div className="mt-1 h-2 rounded bg-navy-900">
-      <div className="h-2 rounded bg-coral" style={{ width: `${Math.min(1, Math.max(0, ratio)) * 100}%` }} />
+    <div
+      role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r * 100)}
+      className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-navy-700"
+    >
+      <div
+        className={`h-full rounded-full ${r >= 1 ? 'bg-emerald-400' : 'bg-gradient-to-r from-coral to-orange-400'}`}
+        style={{ width: `${r * 100}%` }}
+      />
     </div>
   );
 }
 
 export default function Program({ profile, workouts, onProfileChange }: { profile: UserProfile; workouts: Workout[]; onProfileChange: () => void }) {
   const now = Date.now();
+  const [tab, setTab] = useState<ProgramTab>('ringkasan');
   const raceIso = profile.targetRaceDate ? isoFromRaceTs(profile.targetRaceDate) : null;
   const [raceText, setRaceText] = useState(raceIso ?? '');
   const [mode, setMode] = useState<PlanMode>(loadPlanMode);
@@ -57,117 +78,136 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
   const easyPace = vd != null ? 60000 / velocityFor(vd, ZONE_FRACTION.easy) : 360;
   const selection = selectBestPlan(workouts, profile, { now, projected5kSec: preds['5K']?.finalSec ?? null });
   const curriculum = resolvePlan(mode, selection);
-  const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Program</h1>
+      <Tabs idBase="program" label="Bagian program" tabs={PROGRAM_TABS} value={tab} onChange={setTab} />
 
-      <label className={`${card} block text-sm`}>Tanggal lomba <span className="text-xs text-slate-400">(sinkron dengan Profil)</span>
-        <input type="date" value={raceText} onChange={(e) => void saveRaceDate(e.target.value)} className={field} />
-      </label>
-
-      <section className={card} aria-label="Rekomendasi Pelatih">
-        <div className="text-[11px] uppercase text-slate-400">Rekomendasi Pelatih untuk Kondisi Anda</div>
-        <div className="mt-1 font-semibold text-coral">
-          {mode === 'auto' ? 'Otomatis' : 'Pilihan Anda'}: {PLAN_LABEL[curriculum]}
-        </div>
-        {mode !== 'auto' && curriculum !== selection.plan && (
-          <p className="mt-1 text-xs text-amber-400">Rekomendasi otomatis untuk kondisi Anda saat ini: {PLAN_LABEL[selection.plan]}.</p>
-        )}
-        <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Pilih kurikulum">
-          {MODE_PILLS.map(([m, label]) => (
-            <button key={m} type="button" aria-pressed={mode === m} onClick={() => chooseMode(m)}
-              className={`rounded-full px-2 py-2 text-xs font-semibold ${mode === m ? 'bg-coral text-navy-900' : 'border border-navy-700 text-slate-300'}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-300">
-          {selection.reasons.map((r, i) => <li key={i}>{r}</li>)}
-        </ul>
-        {target !== '5K' && <p className="mt-2 text-xs text-slate-400">Kedua kurikulum ini untuk 5K, sedangkan jarak target Anda {target}.</p>}
-      </section>
-
-      <section className={card}>
-        <div className="text-xs uppercase tracking-wide text-slate-400">Hitung mundur · {target}</div>
-        <div className="mt-1 text-4xl font-bold tabular-nums text-coral">{daysLeft == null ? '–' : Math.max(0, daysLeft)}</div>
-        <div className="text-sm text-slate-400">
-          {daysLeft == null ? 'Isi tanggal lomba di atas' : daysLeft < 0 ? 'Lomba sudah lewat' : `hari lagi · ${rem?.weeksRemaining} minggu`}
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 text-sm tabular-nums">
-          <div>Target waktu<div className="font-semibold">{fmtHms(profile.targetTimeSec)}</div></div>
-          <div>Pace dibutuhkan<div className="font-semibold">{fmtPace(goalPace)} /km</div></div>
-          <div>Prediksi saat ini<div className="font-semibold">{pred ? fmtHms(pred.finalSec) : '–'}</div></div>
-          <div>Selisih<div className="font-semibold">{gap == null ? '–' : gap > 0 ? `+${fmtHms(gap)}` : `−${fmtHms(-gap)}`}</div></div>
-        </div>
-        {outlook && currentPace != null && (
-          <div className="mt-3 rounded-lg bg-navy-900 p-3 text-sm tabular-nums">
-            <div className="text-[11px] uppercase text-slate-400">Peluang pecah PB</div>
-            <div className="font-semibold text-coral">{outlook.label}</div>
-            <div className="mt-1 text-slate-300">
-              Gap waktu: {outlook.gapSec > 0 ? `+${Math.round(outlook.gapSec)} dtk (${fmtHms(outlook.gapSec)})` : `${Math.round(outlook.gapSec)} dtk, sudah di bawah target`}
+      {tab === 'ringkasan' && (
+        <div id="program-panel-ringkasan" role="tabpanel" aria-labelledby="program-tab-ringkasan" className="space-y-4">
+          <section aria-label="Hitung mundur lomba" className="rounded-2xl border border-coral/30 bg-gradient-to-br from-coral/15 to-navy-800 p-4">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Menuju lomba {target}</div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-5xl font-extrabold tabular-nums text-coral">{daysLeft == null ? '–' : Math.max(0, daysLeft)}</span>
+              <span className="text-sm text-slate-300">
+                {daysLeft == null ? 'Isi tanggal lomba di bawah' : daysLeft < 0 ? 'Lomba sudah lewat' : `hari lagi · ${rem?.weeksRemaining} minggu`}
+              </span>
             </div>
-            <div className="text-slate-300">Pace: {fmtPace(currentPace)} → {fmtPace(goalPace)} /km</div>
-            {outlook.perWeekSec != null && <div className="text-slate-300">Perlu ≈ {outlook.perWeekSec.toFixed(1)} dtk perbaikan/minggu</div>}
-          </div>
-        )}
-      </section>
-
-      <section className={card}>
-        <h2 className="text-sm font-semibold text-slate-300">Volume & long run</h2>
-        <div className="mt-2 text-sm tabular-nums">
-          Rata-rata 4 minggu: <span className="font-semibold">{weeklyKm.toFixed(1)} km/minggu</span>
-        </div>
-        {rule && (
-          <>
-            <div className="mt-2 text-xs text-slate-400">Syarat {target}: {rule.weeklyKm} km/minggu</div>
-            <ProgressBar ratio={weeklyKm / rule.weeklyKm} />
-          </>
-        )}
-        {profile.weeklyTargetKm != null && (
-          <>
-            <div className="mt-2 text-xs text-slate-400">Target mingguan Anda: {profile.weeklyTargetKm} km</div>
-            <ProgressBar ratio={weeklyKm / profile.weeklyTargetKm} />
-          </>
-        )}
-        {rule && (
-          <>
-            <div className="mt-3 text-sm tabular-nums">
-              Long run terpanjang: <span className="font-semibold">{longRun.toFixed(1)} km</span>{' '}
-              <span className="text-slate-400">/ syarat {rule.longRunKm} km</span>
+            <div className="mt-4">
+              <Field label="Tanggal lomba" hint="Sinkron dengan Profil" type="date" value={raceText} onChange={(e) => void saveRaceDate(e.target.value)} />
             </div>
-            <ProgressBar ratio={longRun / rule.longRunKm} />
-          </>
-        )}
-        {pen > 0 ? (
-          <div className="mt-4 rounded-lg border border-coral/60 bg-coral/10 p-3 text-sm text-coral">
-            Penalti daya tahan aktif: +{(pen * 100).toFixed(1)}% (≈ +{penMin.toFixed(0)} menit). Volume atau long run di bawah syarat.
-          </div>
-        ) : rule ? (
-          <div className="mt-4 rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-400">Syarat volume dan long run terpenuhi.</div>
-        ) : (
-          <div className="mt-4 text-sm text-slate-400">Tidak ada penalti daya tahan untuk {target}.</div>
-        )}
-      </section>
+          </section>
 
-      <section className={card}>
-        <h2 className="text-sm font-semibold text-slate-300">Zona pace · VDOT {vd == null ? '–' : vd.toFixed(1)}</h2>
-        {vd == null ? (
-          <p className="mt-2 text-sm text-slate-400">Butuh sesi ≥ 3 km dalam 42 hari terakhir.</p>
-        ) : (
-          <div className="mt-3 grid grid-cols-2 gap-2 tabular-nums">
-            {zones.map((z) => (
-              <div key={z} className="rounded-lg bg-navy-900 p-3">
-                <div className="text-[11px] uppercase text-slate-400">{ZONE_NAME[z]}</div>
-                <div className="font-semibold">{fmtPace(60000 / velocityFor(vd, ZONE_FRACTION[z]))} /km</div>
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard label="Target waktu" value={fmtHms(profile.targetTimeSec)} tone="neutral" />
+            <StatCard label="Pace dibutuhkan" value={fmtPace(goalPace)} unit="/km" tone="neutral" />
+            <StatCard label="Prediksi saat ini" term="Riegel" value={pred ? fmtHms(pred.finalSec) : '–'} tone="neutral" />
+            <StatCard
+              label="Selisih ke target"
+              value={gap == null ? '–' : gap > 0 ? `+${fmtHms(gap)}` : `−${fmtHms(-gap)}`}
+              tone={gap == null ? 'neutral' : gap > 0 ? 'warn' : 'good'}
+              context={gap == null ? undefined : gap > 0 ? 'masih di atas target' : 'sudah di bawah target'}
+            />
+          </div>
+
+          {outlook && currentPace != null && (
+            <section className="rounded-2xl border border-amber-400/30 bg-navy-800 p-4 text-sm tabular-nums">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Peluang memecahkan target (PB)</div>
+              <div className="mt-1 text-base font-bold text-coral">{outlook.label}</div>
+              <div className="mt-2 text-slate-300">
+                Selisih waktu: {outlook.gapSec > 0 ? `+${Math.round(outlook.gapSec)} dtk (${fmtHms(outlook.gapSec)})` : `${Math.round(outlook.gapSec)} dtk, sudah di bawah target`}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+              <div className="text-slate-300">Pace: {fmtPace(currentPace)} → {fmtPace(goalPace)} /km</div>
+              {outlook.perWeekSec != null && <div className="text-slate-300">Perlu sekitar {outlook.perWeekSec.toFixed(1)} dtk perbaikan per minggu</div>}
+            </section>
+          )}
 
-      <TrainingPlan profile={profile} workouts={workouts} defaultK5Sec={preds['5K']?.finalSec ?? null} currentPaceSecPerKm={currentPace} startWeeklyKm={weeklyKm} easyPaceSecPerKm={easyPace} curriculum={curriculum} />
+          <section className={card} aria-label="Rekomendasi pelatih">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Program latihan untuk kondisi Anda</div>
+            <div className="mt-1 text-base font-bold text-coral">
+              {mode === 'auto' ? 'Otomatis' : 'Pilihan Anda'}: {PLAN_LABEL[curriculum]}
+            </div>
+            {mode !== 'auto' && curriculum !== selection.plan && (
+              <p className="mt-1 text-xs text-amber-400">Rekomendasi otomatis saat ini: {PLAN_LABEL[selection.plan]}.</p>
+            )}
+            <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Pilih program latihan">
+              {MODE_PILLS.map(([m, label]) => (
+                <button key={m} type="button" aria-pressed={mode === m} onClick={() => chooseMode(m)}
+                  className={`min-h-11 rounded-xl px-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
+                    mode === m ? 'bg-gradient-to-r from-coral to-orange-400 text-navy-900' : 'border border-navy-700 text-slate-300'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-300">
+              {selection.reasons.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+            {target !== '5K' && <p className="mt-2 text-xs text-slate-400">Kedua program ini untuk 5K, sedangkan jarak target Anda {target}.</p>}
+          </section>
+
+          <section className={card}>
+            <h2 className="text-sm font-semibold text-slate-300">Volume dan long run</h2>
+            <div className="mt-2 text-sm tabular-nums">
+              Rata-rata 4 minggu: <span className="font-bold">{weeklyKm.toFixed(1)} km/minggu</span>
+            </div>
+            {rule && (
+              <div className="mt-3">
+                <div className="flex justify-between text-xs text-slate-400"><span>Syarat {target}</span><span className="tabular-nums">{rule.weeklyKm} km/minggu</span></div>
+                <Meter label={`Volume mingguan terhadap syarat ${target}`} ratio={weeklyKm / rule.weeklyKm} />
+              </div>
+            )}
+            {profile.weeklyTargetKm != null && (
+              <div className="mt-3">
+                <div className="flex justify-between text-xs text-slate-400"><span>Target mingguan Anda</span><span className="tabular-nums">{profile.weeklyTargetKm} km</span></div>
+                <Meter label="Volume mingguan terhadap target Anda" ratio={weeklyKm / profile.weeklyTargetKm} />
+              </div>
+            )}
+            {rule && (
+              <div className="mt-3">
+                <div className="flex justify-between text-sm tabular-nums">
+                  <span>Long run terpanjang: <span className="font-bold">{longRun.toFixed(1)} km</span></span>
+                  <span className="text-xs text-slate-400">syarat {rule.longRunKm} km</span>
+                </div>
+                <Meter label={`Long run terhadap syarat ${target}`} ratio={longRun / rule.longRunKm} />
+              </div>
+            )}
+            {pen > 0 ? (
+              <div className="mt-4 rounded-xl border border-coral/60 bg-coral/10 p-3 text-sm text-coral">
+                Daya tahan belum cukup: waktu prediksi ditambah {(pen * 100).toFixed(1)}% (sekitar +{penMin.toFixed(0)} menit). Volume atau long run masih di bawah syarat.
+              </div>
+            ) : rule ? (
+              <div className="mt-4 rounded-xl bg-emerald-400/10 p-3 text-sm text-emerald-300">Syarat volume dan long run terpenuhi.</div>
+            ) : (
+              <div className="mt-4 text-sm text-slate-400">Tidak ada tambahan waktu karena daya tahan untuk {target}.</div>
+            )}
+          </section>
+
+          <section className={card}>
+            <h2 className="text-sm font-semibold text-slate-300">Zona kecepatan latihan <span className="font-normal text-slate-400">(VDOT {vd == null ? '–' : vd.toFixed(1)})</span></h2>
+            {vd == null ? (
+              <p className="mt-2 text-sm text-slate-400">Butuh sesi lari minimal 3 km dalam 42 hari terakhir.</p>
+            ) : (
+              <div className="mt-3 grid grid-cols-2 gap-2 tabular-nums">
+                {zones.map((z) => (
+                  <div key={z} className="rounded-xl bg-navy-900 p-3">
+                    <div className="text-[11px] font-bold uppercase text-slate-400">{ZONE_NAME[z]}</div>
+                    <div className="text-base font-bold">{fmtPace(60000 / velocityFor(vd, ZONE_FRACTION[z]))} <span className="text-xs font-normal text-slate-400">/km</span></div>
+                    <div className="text-[11px] text-slate-400">{ZONE_HINT[z]}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === 'jadwal' && (
+        <div id="program-panel-jadwal" role="tabpanel" aria-labelledby="program-tab-jadwal">
+          <TrainingPlan profile={profile} workouts={workouts} defaultK5Sec={preds['5K']?.finalSec ?? null} currentPaceSecPerKm={currentPace} startWeeklyKm={weeklyKm} easyPaceSecPerKm={easyPace} curriculum={curriculum} />
+        </div>
+      )}
     </div>
   );
 }
