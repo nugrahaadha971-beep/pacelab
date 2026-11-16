@@ -13,20 +13,12 @@ import { fmtHms, todayStr } from './format';
 import TrainingPlan from './TrainingPlan';
 import { Field, StatCard, Tabs } from './ui';
 
-type Zone = keyof typeof ZONE_FRACTION;
 type ProgramTab = 'ringkasan' | 'jadwal';
 const PROGRAM_TABS: ReadonlyArray<{ id: ProgramTab; label: string }> = [
   { id: 'ringkasan', label: 'Ringkasan' },
   { id: 'jadwal', label: 'Jadwal' },
 ];
 const card = 'rounded-2xl border border-white/5 bg-navy-800 p-4';
-const ZONE_NAME: Record<Zone, string> = { easy: 'Easy', marathon: 'Marathon', threshold: 'Threshold', interval: 'Interval' };
-const ZONE_HINT: Record<Zone, string> = {
-  easy: 'Santai, masih bisa ngobrol',
-  marathon: 'Stabil untuk jarak jauh',
-  threshold: 'Keras tapi terkendali',
-  interval: 'Cepat, per ulangan',
-};
 const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
 
 /** Bar progres dengan semantik progressbar; hijau bila sudah memenuhi syarat. */
@@ -74,7 +66,6 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
   const pen = penaltyPct(target, workouts, now);
   const penMin = pred ? (pred.finalSec - pred.baseSec) / 60 : 0;
   const vd = currentVdot(workouts, now);
-  const zones = Object.keys(ZONE_FRACTION) as Zone[];
   const easyPace = vd != null ? 60000 / velocityFor(vd, ZONE_FRACTION.easy) : 360;
   const selection = selectBestPlan(workouts, profile, { now, projected5kSec: preds['5K']?.finalSec ?? null });
   const curriculum = resolvePlan(mode, selection);
@@ -184,22 +175,6 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
             )}
           </section>
 
-          <section className={card}>
-            <h2 className="text-sm font-semibold text-slate-300">Zona kecepatan latihan <span className="font-normal text-slate-400">(VDOT {vd == null ? '–' : vd.toFixed(1)})</span></h2>
-            {vd == null ? (
-              <p className="mt-2 text-sm text-slate-400">Butuh sesi lari minimal 3 km dalam 42 hari terakhir.</p>
-            ) : (
-              <div className="mt-3 grid grid-cols-2 gap-2 tabular-nums">
-                {zones.map((z) => (
-                  <div key={z} className="rounded-xl bg-navy-900 p-3">
-                    <div className="text-[11px] font-bold uppercase text-slate-400">{ZONE_NAME[z]}</div>
-                    <div className="text-base font-bold">{fmtPace(60000 / velocityFor(vd, ZONE_FRACTION[z]))} <span className="text-xs font-normal text-slate-400">/km</span></div>
-                    <div className="text-[11px] text-slate-400">{ZONE_HINT[z]}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
       )}
 

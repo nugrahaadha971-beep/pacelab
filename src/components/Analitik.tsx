@@ -2,10 +2,12 @@ import { useState, type ReactNode } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { RaceDistance, UserProfile, Workout } from '../analytics/types';
 import { acwr, DAY_MS, efficiencyFactor } from '../analytics/workload';
-import { predictAll, RACE_KM } from '../analytics/predictor';
+import { currentVdot, predictAll, RACE_KM } from '../analytics/predictor';
+import { resolveMaxHr } from '../plans/hrZones';
 import { fmtHms } from './format';
 import { weeklyKm } from './historyFilter';
 import AcwrGauge from './AcwrGauge';
+import { ZonaPaceCard } from './CoachCard';
 
 const RANGES = [7, 28, 90] as const;
 type Range = (typeof RANGES)[number];
@@ -39,6 +41,8 @@ export default function Analitik({ profile, workouts }: { profile: UserProfile; 
   const weekly = weeklyKm(workouts, now, Math.max(1, Math.round(days / 7)));
   const preds = predictAll(workouts, now);
   const dists = Object.keys(RACE_KM) as RaceDistance[];
+  const vd = currentVdot(workouts, now);
+  const maxHr = resolveMaxHr(profile, workouts);
 
   return (
     <div className="space-y-4">
@@ -109,6 +113,8 @@ export default function Analitik({ profile, workouts }: { profile: UserProfile; 
           </Card>
         </>
       )}
+
+      {vd != null && <ZonaPaceCard vdot={vd} maxHr={maxHr} />}
 
       <Card title="Prediksi waktu lomba (Riegel)">
         <div className="divide-y divide-navy-700 tabular-nums">

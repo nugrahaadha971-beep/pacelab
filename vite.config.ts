@@ -10,7 +10,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: false, // memakai public/manifest.json
-      workbox: { globPatterns: ['**/*.{js,css,html,png,svg,json}'] },
+      workbox: { globPatterns: ['**/*.{js,css,html,png,svg,json,woff2}'] },
     }),
   ],
 });

@@ -44,7 +44,7 @@ export function Button({ variant = 'primary', block = true, className, type = 'b
       type={type}
       {...rest}
       className={cx(
-        'inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2 text-sm transition',
+        'inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2 font-display text-sm transition',
         'active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral focus-visible:ring-offset-2 focus-visible:ring-offset-navy-900',
         'disabled:cursor-not-allowed disabled:opacity-50',
         BUTTON_STYLE[variant],
@@ -172,7 +172,7 @@ export function StatCard({ label, term, value, unit, context, tone = 'good' }: S
         {label}
         {term && <span className="ml-1 font-medium normal-case tracking-normal">({term})</span>}
       </div>
-      <div className={cx('mt-1 text-2xl font-extrabold tabular-nums', TONE_TEXT[tone])}>
+      <div className={cx('mt-1 font-display text-2xl font-extrabold tabular-nums', TONE_TEXT[tone])}>
         {value}
         {unit && <span className="ml-1 text-sm font-bold text-slate-300">{unit}</span>}
       </div>
@@ -244,7 +244,7 @@ export function Tabs<T extends string>({
           aria-controls={`${idBase}-panel-${t.id}`}
           onClick={() => onChange(t.id)}
           className={cx(
-            'min-h-11 rounded-xl text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral',
+            'min-h-11 rounded-xl font-display text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral',
             value === t.id ? 'bg-gradient-to-r from-coral to-orange-400 text-navy-900' : 'text-slate-300',
           )}
         >
