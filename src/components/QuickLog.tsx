@@ -7,7 +7,7 @@ import { parseFit } from '../parsers/fitParser';
 import { parseGpx } from '../parsers/gpxParser';
 import { parseDuration } from '../parsers/manual';
 import { todayStr } from './format';
-import { Button, Field } from './ui';
+import { Field, PrimaryButton, SegmentedTabs } from './ui';
 
 const TYPES: { id: WorkoutType; label: string }[] = [
   { id: 'easy', label: 'Easy' }, { id: 'tempo', label: 'Tempo' }, { id: 'interval', label: 'Interval' },
@@ -42,20 +42,33 @@ function TypePicker({ value, onChange }: { value: WorkoutType; onChange: (t: Wor
   );
 }
 
+/** Topeng durasi gaya kalkulator: ketik angka saja, hasilnya HH:MM:SS (4500 → 00:45:00). */
+function maskDuration(raw: string): string {
+  const d = raw.replace(/\D/g, '').replace(/^0+/, '').slice(-6);
+  if (d === '') return '';
+  const p = d.padStart(6, '0');
+  return `${p.slice(0, 2)}:${p.slice(2, 4)}:${p.slice(4)}`;
+}
+
+const CATAT_TABS = [
+  { id: 'manual' as const, label: 'Catat manual' },
+  { id: 'impor' as const, label: 'Impor file (.FIT/.GPX)' },
+];
+
 /** Skala 1–10 yang bisa diketuk. Ketuk angka terpilih sekali lagi untuk mengosongkan. */
-function RpeScale({ value, onChange, error, hint }: { value: number | null; onChange: (v: number | null) => void; error?: string; hint?: string }) {
+function RpeScale({ value, onChange, error, hint, warn }: { value: number | null; onChange: (v: number | null) => void; error?: string; hint?: string; warn?: string }) {
   return (
     <div>
       <div className="text-sm font-semibold text-slate-200">
         Seberapa berat rasanya? <span className="font-normal text-slate-400">(RPE)</span>
       </div>
-      <div role="radiogroup" aria-label="Tingkat berat sesi, 1 sampai 10" className="mt-1 grid grid-cols-5 gap-2">
+      <div role="radiogroup" aria-label="Tingkat berat sesi, 1 sampai 10" className={`mt-1 grid grid-cols-5 gap-2 ${warn ? 'rounded-2xl p-1.5 ring-2 ring-amber-400/70' : ''}`}>
         {RPE_VALUES.map((n) => {
           const on = value === n;
           return (
             <button key={n} type="button" role="radio" aria-checked={on} onClick={() => onChange(on ? null : n)}
               className={`min-h-11 rounded-xl border text-base font-bold tabular-nums transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
-                on ? 'border-transparent bg-gradient-to-b from-amber-400 to-coral text-navy-900' : 'border-navy-700 bg-navy-800 text-slate-300'
+                on ? 'border-transparent bg-coral text-navy-950' : 'border-navy-700 bg-navy-800 text-slate-300'
               }`}>
               {n}
             </button>
@@ -63,7 +76,7 @@ function RpeScale({ value, onChange, error, hint }: { value: number | null; onCh
         })}
       </div>
       <div className="mt-1 flex justify-between text-xs text-slate-400"><span>1 = sangat ringan</span><span>10 = tenaga maksimal</span></div>
-      {error ? <p role="alert" className="mt-1 text-xs text-coral">{error}</p> : hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
+      {error ? <p role="alert" className="mt-1 text-xs text-coral">{error}</p> : warn ? <p role="alert" className="mt-1 text-xs font-semibold text-amber-300">{warn}</p> : hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
     </div>
   );
 }
@@ -85,6 +98,7 @@ export default function QuickLog({ profile, onSaved, onDone }: { profile: UserPr
   // Impor
   const [impType, setImpType] = useState<WorkoutType>('easy');
   const [impRpe, setImpRpe] = useState<number | null>(null);
+  const [impWarn, setImpWarn] = useState(false);
   // Manual
   const [date, setDate] = useState(todayStr());
   const [duration, setDuration] = useState('');
@@ -102,7 +116,7 @@ export default function QuickLog({ profile, onSaved, onDone }: { profile: UserPr
     return () => clearTimeout(id);
   }, [msg]);
 
-  const switchTab = (next: Tab) => { setTab(next); setMsg(null); setErrs({}); };
+  const switchTab = (next: Tab) => { setTab(next); setMsg(null); setErrs({}); setImpWarn(false); };
 
   const onImport = async (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
@@ -111,12 +125,14 @@ export default function QuickLog({ profile, onSaved, onDone }: { profile: UserPr
     try {
       const parsed = /\.fit$/i.test(file.name) ? parseFit(await file.arrayBuffer()) : parseGpx(await file.text());
       if (parsed.avgHr == null && impRpe == null) {
+        setImpWarn(true);
         return fail('File ini tidak punya data detak jantung. Pilih tingkat berat (RPE) di atas, lalu pilih berkas lagi agar beban latihan bisa dihitung.');
       }
       if (isDuplicate(await db.workouts.toArray(), parsed)) {
         return fail('Sesi ini sudah ada (waktu dan jarak sama). Impor dilewati.');
       }
       await db.workouts.add(finalizeWorkout({ ...parsed, workoutType: impType, rpe: impRpe }, profile));
+      setImpWarn(false);
       setMsg({ text: `Sesi ${parsed.source.toUpperCase()} tersimpan: ${parsed.distanceKm.toFixed(2)} km.`, ok: true });
       onSaved();
     } catch (err) {
@@ -157,23 +173,13 @@ export default function QuickLog({ profile, onSaved, onDone }: { profile: UserPr
 
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="Cara mencatat sesi" className="grid grid-cols-2 gap-1 rounded-2xl bg-navy-800 p-1">
-        {([['manual', 'Catat manual'], ['impor', 'Impor file']] as const).map(([id, label]) => (
-          <button key={id} type="button" role="tab" id={`tab-${id}`} aria-selected={tab === id} aria-controls={`panel-${id}`}
-            onClick={() => switchTab(id)}
-            className={`min-h-11 rounded-xl text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
-              tab === id ? 'bg-gradient-to-r from-coral to-orange-400 text-navy-900' : 'text-slate-300'
-            }`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs idBase="catat" label="Cara mencatat sesi" tabs={CATAT_TABS} value={tab} onChange={switchTab} />
 
       {tab === 'manual' ? (
-        <form id="panel-manual" role="tabpanel" aria-labelledby="tab-manual" onSubmit={onManual} noValidate className="space-y-4">
+        <form id="catat-panel-manual" role="tabpanel" aria-labelledby="catat-tab-manual" onSubmit={onManual} noValidate className="space-y-4">
           <Field label="Tanggal" type="date" value={date} max={todayStr()} onChange={(e) => setDate(e.target.value)} error={errs.date} />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Durasi" hint="jam:menit:detik, contoh 00:45:00" value={duration} onChange={(e) => setDuration(e.target.value)}
+            <Field label="Durasi" hint="Ketik angkanya saja: 4500 jadi 00:45:00" inputMode="numeric" value={duration} onChange={(e) => setDuration(maskDuration(e.target.value))}
               placeholder="00:45:00" autoComplete="off" error={errs.duration} />
             <Field label="Jarak" term="km" hint="Contoh 8,5" inputMode="decimal" value={distance} onChange={(e) => setDistance(e.target.value)}
               placeholder="8,0" autoComplete="off" error={errs.distance} />
@@ -181,13 +187,14 @@ export default function QuickLog({ profile, onSaved, onDone }: { profile: UserPr
           <TypePicker value={manType} onChange={setManType} />
           <RpeScale value={rpe} onChange={setRpe} error={errs.rpe} />
           {msg && <Notice msg={msg} />}
-          <Button type="submit">Simpan sesi</Button>
+          <PrimaryButton type="submit">Simpan sesi</PrimaryButton>
         </form>
       ) : (
-        <div id="panel-impor" role="tabpanel" aria-labelledby="tab-impor" className="space-y-4">
+        <div id="catat-panel-impor" role="tabpanel" aria-labelledby="catat-tab-impor" className="space-y-4">
           <TypePicker value={impType} onChange={setImpType} />
-          <RpeScale value={impRpe} onChange={setImpRpe} hint="Wajib diisi bila file tidak punya data detak jantung." />
-          <label className="flex min-h-11 w-full cursor-pointer items-center justify-center rounded-xl bg-gradient-to-r from-coral to-orange-400 px-4 py-2 text-sm font-bold text-navy-900 shadow-lg shadow-coral/25 focus-within:ring-2 focus-within:ring-coral focus-within:ring-offset-2 focus-within:ring-offset-navy-900">
+          <RpeScale value={impRpe} onChange={(v) => { setImpRpe(v); if (v != null) setImpWarn(false); }} hint="Wajib diisi bila file tidak punya data detak jantung."
+            warn={impWarn ? 'File ini tidak punya data detak jantung. Pilih RPE di sini, lalu pilih berkas lagi.' : undefined} />
+          <label className="flex min-h-[46px] w-full cursor-pointer items-center justify-center rounded-xl bg-coral px-4 py-2 font-display text-sm font-extrabold text-navy-950 shadow-lg shadow-coral/25 focus-within:ring-2 focus-within:ring-coral focus-within:ring-offset-2 focus-within:ring-offset-navy-900">
             Pilih berkas .FIT / .GPX
             <input type="file" accept=".fit,.gpx" onChange={onImport} className="sr-only" />
           </label>

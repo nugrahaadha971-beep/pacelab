@@ -5,7 +5,7 @@ import type { RaceDistance, UserProfile } from '../analytics/types';
 import { parseDuration } from '../parsers/manual';
 import { fmtHms } from './format';
 import ConfirmDialog from './ConfirmDialog';
-import { Button, Field, SelectField } from './ui';
+import { Button, Field, PrimaryButton, ScreenHeader, SelectField } from './ui';
 
 const DISTANCES: RaceDistance[] = ['5K', '10K', '21.1K', '42.2K'];
 
@@ -106,10 +106,10 @@ export default function Profil({ profile, onSaved }: { profile: UserProfile | nu
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">{profile ? 'Profil & Pengaturan' : 'Atur profil dulu'}</h1>
+      <ScreenHeader title={profile ? 'Profil & Pengaturan' : 'Atur profil dulu'} subtitle={profile ? 'Data diri, target lomba, dan cadangan' : undefined} />
       {!profile && <p className="text-sm text-slate-300">Isi data berikut agar beban latihan, zona kecepatan, dan prediksi lomba bisa dihitung. Semua data hanya tersimpan di perangkat ini.</p>}
 
-      <form onSubmit={save} noValidate className="space-y-4 rounded-2xl border border-white/5 bg-navy-800 p-4">
+      <form onSubmit={save} noValidate className="space-y-4 sport-card p-4">
         <Field label="Usia" hint="Tahun" type="number" inputMode="numeric" value={age || ''} onChange={(e) => setAge(Number(e.target.value))} error={errs.age} />
         <Field label="Detak jantung istirahat" term="Resting HR, bpm" hint="Ukur saat bangun tidur, sebelum bangkit dari tempat tidur." name="restingHr" type="number" inputMode="numeric"
           defaultValue={profile?.restingHr} error={errs.restingHr} />
@@ -129,10 +129,10 @@ export default function Profil({ profile, onSaved }: { profile: UserProfile | nu
         <Field label="Target jarak mingguan" term="km" hint="Boleh dikosongkan. Contoh 30 atau 32,5." name="weeklyTargetKm" inputMode="decimal" autoComplete="off"
           defaultValue={profile?.weeklyTargetKm} error={errs.weeklyTargetKm} />
         {formMsg && <Notice msg={formMsg} />}
-        <Button type="submit">Simpan profil</Button>
+        <PrimaryButton type="submit">Simpan profil</PrimaryButton>
       </form>
 
-      <section className="space-y-3 rounded-2xl border border-white/5 bg-navy-800 p-4" aria-labelledby="cadangan-judul">
+      <section className="space-y-3 sport-card p-4" aria-labelledby="cadangan-judul">
         <h2 id="cadangan-judul" className="text-base font-bold">Cadangan data</h2>
         <p className="text-sm text-slate-400">Cadangan berisi seluruh sesi dan profil. Data hanya tersimpan di perangkat ini, jadi buat cadangan secara berkala.</p>
         <Button variant="secondary" onClick={exportJson}>Ekspor cadangan (.json)</Button>

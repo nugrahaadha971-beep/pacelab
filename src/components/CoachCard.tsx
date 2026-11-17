@@ -114,7 +114,7 @@ export function ZonaPaceCard({ vdot, maxHr }: { vdot: number; maxHr: number | nu
   return (
     <section
       aria-label="Zona Pace dan Intensitas"
-      className="rounded-2xl border border-white/5 bg-navy-800 p-4 shadow-sm"
+      className="sport-card p-4"
     >
       <div className="flex items-center justify-between gap-2">
         <div>
@@ -131,7 +131,7 @@ export function ZonaPaceCard({ vdot, maxHr }: { vdot: number; maxHr: number | nu
           const paceStr = fmtPace(60000 / velocityFor(vdot, ZONE_FRACTION[z.key]));
           const bpmStr = formatBpmRange(z.hrFrac, maxHr);
           return (
-            <div key={z.key} className="rounded-xl border border-white/5 bg-navy-900/75 p-3">
+            <div key={z.key} className="sport-subcard p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -189,7 +189,7 @@ export default function CoachCard({ workouts, profile }: { workouts: Workout[]; 
     <div className="space-y-4">
       <section
         aria-label="Saran Pelatih"
-        className={`rounded-2xl border bg-navy-800 p-4 shadow-sm ${meta.border}`}
+        className="sport-card p-4"
       >
         {/* Header & Lencana Status */}
         <div className="flex items-center justify-between gap-2">
@@ -213,7 +213,7 @@ export default function CoachCard({ workouts, profile }: { workouts: Workout[]; 
 
         {/* Pita Spektrum ACWR (0.0 – 1.8) */}
         {load.ratio != null && (
-          <div className="mt-4 rounded-xl border border-white/5 bg-navy-900/70 px-3 py-2.5">
+          <div className="mt-4 sport-subcard px-3 py-2.5">
             <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold text-slate-400">
               <span>Spektrum Beban (ACWR)</span>
               <span className="tabular-nums text-slate-200">Rasio {load.ratio.toFixed(2)}</span>
@@ -255,7 +255,7 @@ export default function CoachCard({ workouts, profile }: { workouts: Workout[]; 
         <p className="mt-3.5 text-sm leading-relaxed text-slate-200">{advice.detail}</p>
 
         {/* Kotak Sorotan Sesi Berikutnya */}
-        <div className="mt-3.5 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-navy-900 px-3.5 py-2.5">
+        <div className="mt-3.5 flex items-center justify-between gap-3 sport-subcard px-3.5 py-2.5">
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Rekomendasi Sesi Berikutnya

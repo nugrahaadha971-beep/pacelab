@@ -7,7 +7,7 @@ import { cardiacDrift } from '../analytics/workload';
 import { fmtPace } from '../plans/pace';
 import { fmtDate, fmtHms } from './format';
 import { filterWorkouts, type DistFilter, type SourceFilter, type TypeFilter } from './historyFilter';
-import { Button, SelectField } from './ui';
+import { Button, ScreenHeader, SelectField } from './ui';
 import { useDialog } from './useDialog';
 import Sheet from './Sheet';
 
@@ -18,10 +18,10 @@ const TYPE_LABEL: Record<WorkoutType, string> = { easy: 'Easy', tempo: 'Tempo', 
 const TYPE_IDS = Object.keys(TYPE_LABEL) as WorkoutType[];
 /** Warna per jenis sesi: garis di tepi kartu dan teks lencana. Ditulis lengkap agar terdeteksi Tailwind. */
 const TYPE_BORDER: Record<WorkoutType, string> = {
-  easy: 'border-l-emerald-400', tempo: 'border-l-violet-400', interval: 'border-l-amber-400', long_run: 'border-l-sky-400', race: 'border-l-coral',
+  easy: 'border-l-sky-400', tempo: 'border-l-amber-400', interval: 'border-l-amber-400', long_run: 'border-l-indigo-400', race: 'border-l-coral',
 };
 const TYPE_TEXT: Record<WorkoutType, string> = {
-  easy: 'text-emerald-300', tempo: 'text-violet-300', interval: 'text-amber-300', long_run: 'text-sky-300', race: 'text-coral',
+  easy: 'text-sky-300', tempo: 'text-amber-300', interval: 'text-amber-300', long_run: 'text-indigo-300', race: 'text-coral',
 };
 
 interface Filters { dist: DistFilter; source: SourceFilter; type: TypeFilter }
@@ -58,7 +58,7 @@ export default function Riwayat({ workouts, reload }: { workouts: Workout[]; rel
 
   return (
     <div className="space-y-3">
-      <h1 className="text-2xl font-bold">Riwayat</h1>
+      <ScreenHeader title="Riwayat" subtitle="Semua sesi latihan yang sudah tercatat" />
 
       <div className="flex gap-2">
         <label className="relative block flex-1">
@@ -79,11 +79,11 @@ export default function Riwayat({ workouts, reload }: { workouts: Workout[]; rel
         <div className="flex flex-wrap items-center gap-2">
           {active.map((a) => (
             <button key={a.key} type="button" onClick={() => setF({ ...f, [a.key]: 'all' })} aria-label={`Hapus filter ${a.label}`}
-              className="flex min-h-9 items-center gap-1 rounded-full border border-coral/50 bg-coral/15 pl-3 pr-2 text-xs font-bold text-orange-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral">
+              className="flex min-h-11 items-center gap-1 rounded-full border border-coral/50 bg-coral/15 pl-3 pr-2 text-xs font-bold text-orange-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral">
               {a.label}<X size={14} aria-hidden />
             </button>
           ))}
-          <button type="button" onClick={() => setF(NO_FILTER)} className="min-h-9 px-2 text-xs font-semibold text-slate-400 underline">Hapus semua</button>
+          <button type="button" onClick={() => setF(NO_FILTER)} className="min-h-11 px-2 text-xs font-semibold text-slate-400 underline">Hapus semua</button>
         </div>
       )}
 
@@ -100,7 +100,7 @@ export default function Riwayat({ workouts, reload }: { workouts: Workout[]; rel
 
       {list.map((w, i) => (
         <button key={w.id ?? i} type="button" onClick={() => setSel(w)}
-          className={`block w-full rounded-xl border border-white/5 border-l-4 bg-navy-800 p-3 text-left tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${TYPE_BORDER[w.workoutType]}`}>
+          className={`block w-full rounded-xl border border-white/[0.07] border-l-[3px] bg-navy-800 p-3 text-left tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${TYPE_BORDER[w.workoutType]}`}>
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-bold">{fmtDate(w.date)}</span>
             <span className={`text-[11px] font-extrabold uppercase tracking-wide ${TYPE_TEXT[w.workoutType]}`}>{TYPE_LABEL[w.workoutType]} · {w.source}</span>

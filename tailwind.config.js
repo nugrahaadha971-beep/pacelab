@@ -4,12 +4,12 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ['"Plus Jakarta Sans"', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+        display: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
-        navy: { 900: '#0b1220', 800: '#131c2e', 700: '#1d2a40' },
-        coral: '#ff6b5e',
+        navy: { 950: '#050811', 900: '#080D1A', 800: '#101829', 700: '#18243D', 600: '#243456' },
+        coral: '#FF6B5E',
       },
     },
   },

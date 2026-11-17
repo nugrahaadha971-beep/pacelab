@@ -45,8 +45,8 @@ export default function CatatSheet({ profile, onSaved }: { profile: UserProfile;
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Catat sesi"
-        className="fixed right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-coral to-orange-400 text-navy-900 shadow-lg shadow-coral/40 transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral focus-visible:ring-offset-2 focus-visible:ring-offset-navy-900"
-        style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
+        className="fixed right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-coral text-navy-950 shadow-lg shadow-coral/40 transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral focus-visible:ring-offset-2 focus-visible:ring-offset-navy-900"
+        style={{ bottom: 'calc(84px + env(safe-area-inset-bottom))' }}
       >
         <Plus size={28} strokeWidth={2.75} aria-hidden />
       </button>

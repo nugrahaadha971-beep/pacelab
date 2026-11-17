@@ -1,73 +1,92 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
-import type { RaceDistance, UserProfile, Workout } from '../analytics/types';
-import { acwr, DAY_MS, efTrend } from '../analytics/workload';
+import type { UserProfile, Workout } from '../analytics/types';
+import { acwr, DAY_MS } from '../analytics/workload';
 import type { AcwrStatus } from '../analytics/workload';
-import { predictAll, RACE_KM } from '../analytics/predictor';
-import { fmtHms } from './format';
 import { weeklyKm } from './historyFilter';
 import CoachCard from './CoachCard';
-import { InfoHint, StatCard, StatusPill } from './ui';
+import { nextSession } from './nextSession';
+import { KIND_BORDER, KIND_LABEL } from './sessionMeta';
+import { InfoHint, KpiTile, ScreenHeader, StatusPill } from './ui';
 import type { Tone } from './ui';
 
-const DISTS = Object.keys(RACE_KM) as RaceDistance[];
-const tip = { contentStyle: { background: '#131c2e', border: '1px solid #1d2a40', color: '#e2e8f0', fontSize: 12 } };
+const tip = { contentStyle: { background: '#101829', border: '1px solid #243456', color: '#e2e8f0', fontSize: 12 } };
 
 /** Status beban dalam bahasa sehari-hari; istilah teknis dalam kurung. */
-const STATUS: Record<AcwrStatus, { tone: Exclude<Tone, 'neutral'>; title: string; text: string; card: string; num: string }> = {
+const STATUS: Record<AcwrStatus, { tone: Exclude<Tone, 'neutral'>; short: string; text: string; border: string }> = {
   unknown: {
-    tone: 'info', title: 'Data belum cukup',
-    text: 'Catat lebih banyak sesi agar status beban bisa dihitung.',
-    card: 'border-sky-400/25 from-navy-800 to-navy-800', num: 'text-slate-300',
+    tone: 'info', short: 'Data belum cukup',
+    text: 'Catat lebih banyak sesi agar status beban bisa dihitung.', border: 'border-l-sky-400',
   },
   undertraining: {
-    tone: 'warn', title: 'Beban masih ringan (Undertraining)',
-    text: 'Beban Anda di bawah kebiasaan sebelumnya. Boleh menambah latihan sedikit demi sedikit.',
-    card: 'border-amber-400/30 from-amber-950/60 to-navy-800', num: 'text-amber-400',
+    tone: 'warn', short: 'Beban ringan',
+    text: 'Beban Anda di bawah kebiasaan sebelumnya. Boleh menambah latihan sedikit demi sedikit.', border: 'border-l-amber-400',
   },
   sweet_spot: {
-    tone: 'good', title: 'Aman (Sweet Spot)',
-    text: 'Beban seimbang dengan kebiasaan Anda. Lanjutkan sesuai jadwal.',
-    card: 'border-emerald-400/30 from-emerald-950/70 to-navy-800', num: 'text-emerald-400',
+    tone: 'good', short: 'Aman',
+    text: 'Beban seimbang dengan kebiasaan Anda. Lanjutkan sesuai jadwal.', border: 'border-l-emerald-400',
   },
   high_fatigue: {
-    tone: 'bad', title: 'Terlalu berat (High Fatigue)',
-    text: 'Beban naik tajam dibanding kebiasaan Anda. Kurangi intensitas dan beri waktu untuk pulih.',
-    card: 'border-coral/40 from-red-950/60 to-navy-800', num: 'text-coral',
+    tone: 'bad', short: 'Terlalu berat',
+    text: 'Beban naik tajam dibanding kebiasaan Anda. Kurangi intensitas dan beri waktu untuk pulih.', border: 'border-l-coral',
   },
 };
 
 export default function Beranda({ profile, workouts }: { profile: UserProfile; workouts: Workout[] }) {
   const t = Date.now();
   const load = acwr(workouts, profile, t);
-  const ef = efTrend(workouts, t);
-  const preds = predictAll(workouts, t);
   const km7 = workouts.filter((w) => w.date > t - 7 * DAY_MS).reduce((s, w) => s + w.distanceKm, 0);
   const weeks = weeklyKm(workouts, t, 8);
-  const efSub = ef.changePct == null ? 'tren 14 hari: –' : `${ef.changePct >= 0 ? '+' : ''}${ef.changePct.toFixed(1)}% vs 14 hari lalu`;
   const st = STATUS[load.status];
+  const next = nextSession(profile, workouts, t);
+  const s = next?.session;
+  const showName = s && s.name && s.kind !== 'race' && !['Easy Run', 'Long Run'].includes(s.name);
+  const sessionTitle = s ? (s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`) : '';
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Beranda</h1>
+      <ScreenHeader title="Beranda" subtitle="Ringkasan latihan dan saran untuk hari ini" />
       {workouts.length === 0 && (
         <section className="rounded-2xl border border-dashed border-coral/60 bg-coral/10 p-4 text-sm text-slate-200">
-          Belum ada sesi. Ketuk tombol <strong>+</strong> di pojok kanan bawah untuk mengimpor berkas .FIT/.GPX atau mencatat sesi manual. Setelah itu saran pelatih, prediksi, dan grafik akan aktif.
+          Belum ada sesi. Ketuk tombol <strong>+</strong> di pojok kanan bawah untuk mengimpor berkas .FIT/.GPX atau mencatat sesi manual. Setelah itu saran pelatih dan grafik akan aktif.
         </section>
       )}
 
-      <section aria-label="Status latihan" className={`rounded-2xl border bg-gradient-to-br p-4 ${st.card}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Status latihan hari ini</div>
-            <div className="mt-2"><StatusPill tone={st.tone}>{st.title}</StatusPill></div>
+      <section aria-label="Misi hari ini" className={`sport-card border-l-[3.5px] p-4 ${next && s ? KIND_BORDER[s.kind] : st.border}`}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            {next ? (next.isToday ? 'Misi hari ini' : `Misi berikutnya · ${next.dayLabel}`) : 'Status latihan'}
           </div>
-          <div className="shrink-0 text-right">
-            <div className={`text-3xl font-extrabold tabular-nums ${st.num}`}>{load.ratio == null ? '–' : load.ratio.toFixed(2)}</div>
-            <div className="text-[11px] text-slate-400">Rasio beban</div>
-          </div>
+          <StatusPill tone={st.tone}>{st.short}{load.ratio != null ? ` · ${load.ratio.toFixed(2)}` : ''}</StatusPill>
         </div>
-        <p className="mt-3 text-sm leading-relaxed text-slate-200">{st.text}</p>
-        <div className="mt-2 text-xs text-slate-400">
+
+        {next && s ? (
+          <>
+            <h2 className="mt-2 font-display text-lg font-extrabold text-white">{sessionTitle}</h2>
+            <dl className="mt-3 grid grid-cols-2 gap-2 tabular-nums">
+              <div className="sport-subcard p-3">
+                <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Utamakan HR (bpm)</dt>
+                <dd className="mt-0.5 font-display text-base font-extrabold text-emerald-400">
+                  {next.hr ? `${next.hr[0]}–${next.hr[1]}` : 'Isi di Profil'}
+                </dd>
+              </div>
+              <div className="sport-subcard p-3">
+                <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Target pace (/km)</dt>
+                <dd className="mt-0.5 font-display text-base font-extrabold text-white">{next.paceText ?? '–'}</dd>
+              </div>
+            </dl>
+            {next.durationMin != null && s.kind !== 'race' && (
+              <p className="mt-2 text-sm tabular-nums text-slate-300">Sekitar {Math.round(next.durationMin)} menit. Detak jantung jadi patokan utama, pace hanya perkiraan.</p>
+            )}
+          </>
+        ) : (
+          <>
+            <h2 className="mt-2 font-display text-lg font-extrabold text-white">Belum ada sesi terjadwal</h2>
+            <p className="mt-1 text-sm text-slate-300">Isi tanggal lomba di tab Program untuk melihat sesi latihan berikutnya.</p>
+          </>
+        )}
+
+        <p className="mt-3 text-sm leading-relaxed text-slate-300">{st.text}</p>
+        <div className="mt-1 text-xs text-slate-400">
           <InfoHint label="Apa itu rasio beban?" term="ACWR">
             Membandingkan beban latihan 7 hari terakhir dengan rata-rata mingguan sebelumnya. Antara 0,8 dan 1,3 dianggap aman.
           </InfoHint>
@@ -75,44 +94,27 @@ export default function Beranda({ profile, workouts }: { profile: UserProfile; w
       </section>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Beban 7 hari" term="TRIMP" value={Math.round(load.acute)} />
-        <StatCard label="Jarak 7 hari" value={km7.toFixed(1)} unit="km" />
-        <StatCard label="Efisiensi lari" term="EF" value={ef.recent == null ? '–' : ef.recent.toFixed(2)} context={efSub} />
-        <StatCard label="Rasio beban" term="ACWR" value={load.ratio == null ? '–' : load.ratio.toFixed(2)} tone={st.tone} context={st.title} />
+        <KpiTile label="Beban 7 hari" term="TRIMP" value={Math.round(load.acute)} />
+        <KpiTile label="Jarak 7 hari" value={km7.toFixed(1)} unit="km" />
       </div>
 
-      <section className="rounded-2xl border border-white/5 bg-navy-800 p-4">
+      <section className="sport-card p-4">
         <h2 className="text-sm font-semibold text-slate-300">Volume mingguan · 8 minggu terakhir (km)</h2>
         <ResponsiveContainer width="100%" height={140}>
           <BarChart data={weeks} margin={{ top: 16, right: 4, left: 4, bottom: 0 }}>
             <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
             <Tooltip {...tip} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
             <Bar dataKey="km" radius={[5, 5, 2, 2]}>
-              {weeks.map((_, i) => <Cell key={i} fill={i === weeks.length - 1 ? '#ff6b5e' : '#ff6b5e66'} />)}
+              {weeks.map((_, i) => <Cell key={i} fill={i === weeks.length - 1 ? '#FF6B5E' : '#FF6B5E55'} />)}
               <LabelList dataKey="km" position="top" fill="#94a3b8" fontSize={10}
                 formatter={(v: unknown) => (typeof v === 'number' && v > 0 ? Math.round(v) : '')} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-        <p className="text-xs text-slate-400">Batang terang adalah minggu terbaru.</p>
+        <p className="text-xs text-slate-400">Batang terang adalah minggu berjalan.</p>
       </section>
 
       <CoachCard workouts={workouts} profile={profile} />
-
-      <section className="rounded-2xl border border-white/5 bg-navy-800 p-4">
-        <h2 className="text-sm font-semibold text-slate-300">Prediksi waktu lomba <span className="font-normal text-slate-400">(Riegel)</span></h2>
-        <div className="mt-2 grid grid-cols-2 gap-2 tabular-nums">
-          {DISTS.map((d) => {
-            const p = preds[d];
-            return (
-              <div key={d} className="rounded-xl bg-navy-900 p-3">
-                <div className="text-[11px] font-bold uppercase text-slate-400">{d}</div>
-                <div className="text-lg font-bold">{p ? fmtHms(p.finalSec) : '–'}</div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
     </div>
   );
 }

@@ -127,3 +127,8 @@ Label statis "8 minggu lagi" dihapus. Tab **Program** kini memetakan rencana mun
 - 5K "terbaik" = yang tercepat antara proyeksi Riegel dan catatan 5K aktual (4,9–5,2 km). Tanpa sesi bertipe Easy, sesi terakhir dipakai (ditandai di alasan). Data HR kosong dianggap tidak melanggar; 5K tak terproyeksi → Progresif.
 - Zona `test` (88–95% HR maks) dan perkiraan durasi sesi interval/tes (pace nominal) adalah asumsi. Pace interval sebelum Tes 3K dicatat tidak ditampilkan (hanya HR dan "pace menuju PB").
 - Pace race pada kartu memakai target waktu di Profil; sesuaikan bila target Anda belum realistis.
+
+## Analitik Perkembangan (Tahap 9)
+- `src/analytics/progressSummary.ts`: `compareProgress(workouts, now, days)` membandingkan `days` hari terakhir dengan `days` hari sebelumnya (jarak, pace santai, EF, HR santai, kadens, cardiac drift, porsi intensitas 80/20, deret per sesi untuk grafik). Murni dari data `Workout`; skema IndexedDB dan parser tidak berubah.
+- `src/components/Analitik.tsx`: header + pemilih 7/28/90 hari → Ringkasan Perkembangan (kesimpulan 1 kalimat + 4 ubin KPI + terjemahan ke dtk/km dan bpm) → Keseimbangan Intensitas → Rasio Beban (gauge + tren) → Tren Pace Santai (sumbu Y terbalik) & VDOT → grafik EF dan volume mingguan (dipertahankan dari versi sebelumnya) → Pencapaian → Zona Pace & Prediksi Riegel.
+- Penyimpangan kecil dari draf spesifikasi: `'recovery'` dihapus dari himpunan tipe santai (tidak ada di `WorkoutType`, akan error TypeScript); impor memakai ekstensi `.ts` (konvensi repo agar tes `node` jalan); "pace tercepat" mengabaikan pace tidak valid (0); label gauge ACWR diganti `Aman` / `Perlu hati-hati` / `Terlalu berat` (sebelumnya bahasa Inggris).

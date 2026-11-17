@@ -11,14 +11,14 @@ import { loadPlanMode, savePlanMode } from '../plans/scheduleStore';
 import { DAY_MS } from '../analytics/workload';
 import { fmtHms, todayStr } from './format';
 import TrainingPlan from './TrainingPlan';
-import { Field, StatCard, Tabs } from './ui';
+import { Field, KpiTile, ScreenHeader, SegmentedTabs } from './ui';
 
 type ProgramTab = 'ringkasan' | 'jadwal';
 const PROGRAM_TABS: ReadonlyArray<{ id: ProgramTab; label: string }> = [
   { id: 'ringkasan', label: 'Ringkasan' },
   { id: 'jadwal', label: 'Jadwal' },
 ];
-const card = 'rounded-2xl border border-white/5 bg-navy-800 p-4';
+const card = 'sport-card p-4';
 const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
 
 /** Bar progres dengan semantik progressbar; hijau bila sudah memenuhi syarat. */
@@ -30,7 +30,7 @@ function Meter({ label, ratio }: { label: string; ratio: number }) {
       className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-navy-700"
     >
       <div
-        className={`h-full rounded-full ${r >= 1 ? 'bg-emerald-400' : 'bg-gradient-to-r from-coral to-orange-400'}`}
+        className={`h-full rounded-full ${r >= 1 ? 'bg-emerald-400' : 'bg-coral'}`}
         style={{ width: `${r * 100}%` }}
       />
     </div>
@@ -72,12 +72,12 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Program</h1>
-      <Tabs idBase="program" label="Bagian program" tabs={PROGRAM_TABS} value={tab} onChange={setTab} />
+      <ScreenHeader title="Program" subtitle="Rencana menuju lomba dan jadwal latihan" />
+      <SegmentedTabs idBase="program" label="Bagian program" tabs={PROGRAM_TABS} value={tab} onChange={setTab} />
 
       {tab === 'ringkasan' && (
         <div id="program-panel-ringkasan" role="tabpanel" aria-labelledby="program-tab-ringkasan" className="space-y-4">
-          <section aria-label="Hitung mundur lomba" className="rounded-2xl border border-coral/30 bg-gradient-to-br from-coral/15 to-navy-800 p-4">
+          <section aria-label="Hitung mundur lomba" className="sport-card p-4">
             <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Menuju lomba {target}</div>
             <div className="mt-1 flex items-baseline gap-2">
               <span className="text-5xl font-extrabold tabular-nums text-coral">{daysLeft == null ? '–' : Math.max(0, daysLeft)}</span>
@@ -91,10 +91,10 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
           </section>
 
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Target waktu" value={fmtHms(profile.targetTimeSec)} tone="neutral" />
-            <StatCard label="Pace dibutuhkan" value={fmtPace(goalPace)} unit="/km" tone="neutral" />
-            <StatCard label="Prediksi saat ini" term="Riegel" value={pred ? fmtHms(pred.finalSec) : '–'} tone="neutral" />
-            <StatCard
+            <KpiTile label="Target waktu" value={fmtHms(profile.targetTimeSec)} tone="neutral" />
+            <KpiTile label="Pace dibutuhkan" value={fmtPace(goalPace)} unit="/km" tone="neutral" />
+            <KpiTile label="Prediksi saat ini" term="Riegel" value={pred ? fmtHms(pred.finalSec) : '–'} tone="neutral" />
+            <KpiTile
               label="Selisih ke target"
               value={gap == null ? '–' : gap > 0 ? `+${fmtHms(gap)}` : `−${fmtHms(-gap)}`}
               tone={gap == null ? 'neutral' : gap > 0 ? 'warn' : 'good'}
@@ -103,7 +103,7 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
           </div>
 
           {outlook && currentPace != null && (
-            <section className="rounded-2xl border border-amber-400/30 bg-navy-800 p-4 text-sm tabular-nums">
+            <section className="sport-card border-l-[3px] border-l-amber-400 p-4 text-sm tabular-nums">
               <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Peluang memecahkan target (PB)</div>
               <div className="mt-1 text-base font-bold text-coral">{outlook.label}</div>
               <div className="mt-2 text-slate-300">
@@ -125,8 +125,8 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
             <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Pilih program latihan">
               {MODE_PILLS.map(([m, label]) => (
                 <button key={m} type="button" aria-pressed={mode === m} onClick={() => chooseMode(m)}
-                  className={`min-h-11 rounded-xl px-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
-                    mode === m ? 'bg-gradient-to-r from-coral to-orange-400 text-navy-900' : 'border border-navy-700 text-slate-300'
+                  className={`min-h-[44px] rounded-xl px-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
+                    mode === m ? 'bg-coral text-navy-950' : 'border border-navy-600 text-slate-300'
                   }`}>
                   {label}
                 </button>

@@ -5,7 +5,7 @@ const CX = 100;
 const CY = 100;
 const R = 80;
 const LABEL: Record<AcwrStatus, string> = {
-  unknown: 'Data belum cukup', undertraining: 'Undertraining', sweet_spot: 'Sweet Spot', high_fatigue: 'High Fatigue',
+  unknown: 'Data belum cukup', undertraining: 'Perlu hati-hati', sweet_spot: 'Aman', high_fatigue: 'Terlalu berat',
 };
 const COLOR: Record<AcwrStatus, string> = {
   unknown: '#64748b', undertraining: '#fbbf24', sweet_spot: '#34d399', high_fatigue: '#ff6b5e',

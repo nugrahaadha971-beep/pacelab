@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { UserProfile, Workout } from '../analytics/types';
 import { PENALTY_RULES, RACE_KM } from '../analytics/predictor';
 import { applyAdaptation, calibrateFrom3k, evaluateAdaptation, gatherAdaptiveInput, intervalPaceRange, TEST3K_FACTOR, weekPace } from '../plans/adaptiveEngine';
@@ -16,23 +16,19 @@ import { loadScheduleState, saveScheduleState } from '../plans/scheduleStore';
 import { parseDuration } from '../parsers/manual';
 import { fmtDate, fmtHms, todayStr } from './format';
 import Sheet from './Sheet';
+import { KIND_BORDER, KIND_LABEL } from './sessionMeta';
 import { Button, Field } from './ui';
 
-const KIND_LABEL: Record<PlanSession['kind'], string> = { recovery: 'Easy / Recovery Run', speed: 'Speed Run', long: 'Long Run', race: 'Hari Lomba' };
 const KIND_HINT: Record<PlanSession['kind'], string> = {
   recovery: 'Lari santai: napas tenang, masih bisa ngobrol. Jangan dipercepat walau terasa terlalu mudah.',
   long: 'Lari terpanjang minggu ini. Pace santai, sama seperti Easy Run. Boleh jeda jalan kaki bila perlu.',
   speed: 'Lari cepat berinterval. Ikuti pace tiap langkah; sela pemulihan dilakukan dengan lari/jalan pelan.',
   race: 'Hari uji PB: lari dengan target pace PB di bawah.',
 };
-/** Garis warna di tepi kartu sesi; ditulis lengkap agar terdeteksi Tailwind. */
-const KIND_BORDER: Record<PlanSession['kind'], string> = {
-  recovery: 'border-l-emerald-400', speed: 'border-l-coral', long: 'border-l-sky-400', race: 'border-l-amber-400',
-};
 const PHASE_LABEL: Record<Phase, string> = { base: 'Base Building', build: 'Build', taper: 'Taper', race: 'Lomba' };
 const STORE_KEY = 'pacelab.k5';
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Sen … Min
-const card = 'rounded-2xl border border-white/5 bg-navy-800 p-4';
+const card = 'sport-card p-4';
 const control = 'mt-1 block min-h-11 w-full rounded-xl border border-navy-700 bg-navy-900 px-3 py-2 text-sm tabular-nums text-slate-100 focus:border-coral focus:outline-none focus:ring-2 focus:ring-coral/40';
 const badge = 'inline-block rounded-full bg-coral/15 px-2 py-0.5 text-[11px] font-semibold text-coral';
 
@@ -88,7 +84,7 @@ function SettingsSheet({ st, update, k5Text, onK5, k5, paceChartRow, fromPredict
               return (
                 <button key={d} type="button" aria-pressed={on} onClick={() => update(toggleDay(st, d))}
                   className={`min-h-11 rounded-xl text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
-                    on ? 'bg-gradient-to-b from-coral to-orange-400 text-navy-900' : 'border border-navy-700 text-slate-300'
+                    on ? 'bg-coral text-navy-950' : 'border border-navy-600 text-slate-300'
                   }`}>
                   {WEEKDAY_SHORT[d]}
                 </button>
@@ -146,6 +142,12 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const maxWeeklyKm = profile.weeklyTargetKm ?? PENALTY_RULES[profile.targetDistance]?.weeklyKm ?? 50;
 
   const title = <h2 className="text-lg font-bold">Jadwal latihan · menuju PB {profile.targetDistance}</h2>;
+  const head = (
+    <div className="flex items-center justify-between gap-3">
+      {title}
+      <Button variant="secondary" block={false} onClick={() => setSettings(true)} aria-haspopup="dialog" className="shrink-0">Atur jadwal</Button>
+    </div>
+  );
   const settingsSheet = (missed: number) => settings && (
     <SettingsSheet st={st} update={update} k5Text={k5Text} onK5={onK5} k5={k5} paceChartRow={row} fromPrediction={fromPrediction} missed={missed} onClose={() => setSettings(false)} />
   );
@@ -153,9 +155,8 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   if (!raceIso) {
     return (
       <div className="space-y-3">
-        {title}
+        {head}
         <p className="rounded-2xl border border-dashed border-coral/60 bg-coral/10 p-4 text-sm">Isi tanggal lomba di tab Ringkasan untuk membuat jadwal berdasarkan kalender nyata.</p>
-        <Button variant="secondary" onClick={() => setSettings(true)}>Atur jadwal</Button>
         {settingsSheet(0)}
       </div>
     );
@@ -215,7 +216,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   return (
     <div className="space-y-4">
       <header className="space-y-2">
-        {title}
+        {head}
         <p className="text-sm tabular-nums text-slate-300">
           {plan.daysRemaining} hari · {plan.weeksRemaining} minggu menuju {formatDateId(raceIso)}
           {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak ${curriculum === 'progressive5k' ? 11 : 8} minggu` : ''}
@@ -226,7 +227,6 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
           </p>
         )}
         {missed > 0 && <p className="text-sm text-amber-400">{missed} sesi terlewat. Buka "Atur jadwal" untuk menggeser jadwal.</p>}
-        <Button variant="secondary" onClick={() => setSettings(true)} aria-haspopup="dialog">Atur jadwal</Button>
       </header>
 
       <section className="rounded-2xl border border-coral/40 bg-coral/5 p-4 text-sm" aria-labelledby="adaptasi-judul">
@@ -307,14 +307,19 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
           const showName = s.name && s.kind !== 'race' && !['Easy Run', 'Long Run'].includes(s.name);
           const swapChoices = week.sessions.filter((o) => o.id !== s.id && o.kind !== 'race' && !done.has(o.id)).map((o) => byId.get(o.id) as PlanSession);
           return (
-            <article key={s.id} className={`${card} border-l-4 ${KIND_BORDER[s.kind]} ${isDone ? 'opacity-80' : ''}`}>
+            <article key={s.id} className={`${card} border-l-[3px] ${KIND_BORDER[s.kind]} ${isDone ? 'opacity-80' : ''}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold tabular-nums">{formatDateId(s.date)}</span>
-                <label className={`flex min-h-11 items-center gap-2 text-sm font-semibold ${statusColor}`}>
-                  <input type="checkbox" checked={isDone} disabled={auto} onChange={() => update(toggleDone(st, s.id))}
-                    aria-label={`Tandai selesai: ${KIND_LABEL[s.kind]}`} className="h-5 w-5 accent-coral" />
-                  {status}{auto ? ' (otomatis)' : ''}
-                </label>
+                <div className={`flex items-center gap-2 ${statusColor}`}>
+                  <span className="text-sm font-semibold">{status}{auto ? ' (otomatis)' : ''}</span>
+                  <button type="button" role="checkbox" aria-checked={isDone} disabled={auto} onClick={() => update(toggleDone(st, s.id))}
+                    aria-label={`Tandai selesai: ${KIND_LABEL[s.kind]}`}
+                    className={`flex h-11 w-11 items-center justify-center rounded-xl border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-60 ${
+                      isDone ? 'border-emerald-400 bg-emerald-400 text-navy-950' : 'border-navy-600 text-transparent'
+                    }`}>
+                    <Check size={22} strokeWidth={3} aria-hidden />
+                  </button>
+                </div>
               </div>
               <h3 className="text-base font-bold">{s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`}</h3>
               <p className="mt-0.5 text-sm text-slate-400">{KIND_HINT[s.kind]}</p>
