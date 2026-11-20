@@ -3,6 +3,8 @@
 import type { SessionKind } from './nike5k.ts';
 import type { Zone } from './hrZones.ts';
 
+export type TestKind = '3k' | '5k' | 'maf';
+
 export interface TemplateSession {
   kind: SessionKind;
   name: string;
@@ -10,7 +12,7 @@ export interface TemplateSession {
   zone: Zone;
   /** Total menit termasuk strides, tanpa pemanasan/pendinginan jalan 5' (interval/tes: sudah termasuk 10'+10'). */
   durationMin: number;
-  test?: '3k' | '5k';
+  test?: TestKind;
   /** Jarak ulangan (km) untuk sesi interval; dipakai kalibrasi pace dari Tes 3K. */
   repKm?: number;
   /** Hari tetap (0 = Min … 6 = Sab); tes selalu Sabtu. */

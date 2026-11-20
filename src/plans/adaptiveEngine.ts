@@ -126,7 +126,7 @@ export function applyAdaptation(sessions: PlanSession[], d: AdaptiveDecision, to
   const upcoming = sessions
     .filter((s) => s.kind !== 'race' && dayNum(s.date) >= dayNum(todayIso) && !done.has(s.id))
     .sort((a, b) => dayNum(a.date) - dayNum(b.date));
-  const nextSpeed = upcoming.find((s) => s.kind === 'speed');
+  const nextSpeed = upcoming.find((s) => s.kind === 'speed' && s.test !== 'maf'); // MAF Test bukan sesi kecepatan
   const nextEasy = upcoming.find((s) => s.kind === 'recovery');
   const nextLong = upcoming.find((s) => s.kind === 'long');
 

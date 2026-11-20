@@ -40,7 +40,7 @@ export default function Beranda({ profile, workouts }: { profile: UserProfile; w
   const next = nextSession(profile, workouts, t);
   const s = next?.session;
   const showName = s && s.name && s.kind !== 'race' && !['Easy Run', 'Long Run'].includes(s.name);
-  const sessionTitle = s ? (s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`) : '';
+  const sessionTitle = s ? (s.convertedFrom || s.test === 'maf' ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`) : '';
 
   return (
     <div className="space-y-4">

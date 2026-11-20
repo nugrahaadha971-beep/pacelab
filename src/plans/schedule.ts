@@ -2,10 +2,12 @@
 import { NIKE_5K_PLAN } from './nike5k.ts';
 import type { Session, SessionKind } from './nike5k.ts';
 import { PROGRESSIVE_5K, PROGRESSIVE_RACE_STEPS } from './progressive5k.ts';
+import type { TestKind } from './progressive5k.ts';
+import { MAF_5K, MAF_RACE_STEPS } from './maf.ts';
 import { hrRange } from './hrZones.ts';
 import type { Zone } from './hrZones.ts';
 
-export type CurriculumId = 'nike5k' | 'progressive5k';
+export type CurriculumId = 'nike5k' | 'progressive5k' | 'maf';
 
 export type IsoDate = string; // YYYY-MM-DD (kalender, tanpa zona waktu)
 export type Phase = 'base' | 'build' | 'taper' | 'race';
@@ -157,7 +159,7 @@ export interface PlanSession {
   demoted?: boolean; // speed → easy karena tidak ada hari yang tidak bersebelahan dengan Long Run
   zone?: Zone; // zona HR: easy (Easy/Long), interval, race, test
   hr?: [number, number] | null; // target bpm dari HR maks
-  test?: '3k' | '5k';
+  test?: TestKind;
   repKm?: number; // jarak ulangan interval (km)
   // Diisi oleh adaptiveEngine
   adjDurationMin?: number;
@@ -195,6 +197,7 @@ export interface PlanOptions {
   easyPaceSecPerKm: number;
   curriculum?: CurriculumId; // default 'nike5k'
   maxHr?: number | null; // untuk target bpm per sesi
+  mafHr?: number | null; // HR MAF (180 − usia ± penyesuaian) untuk zona 'maf'
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -252,7 +255,7 @@ const adjacent = (a: IsoDate | null, b: IsoDate | null) => a != null && b != nul
 
 export interface Draft {
   id: string; kind: SessionKind; name: string; steps: string[]; distanceKm: number | null; durationMin: number | null; demoted?: boolean;
-  zone?: Zone; test?: '3k' | '5k'; repKm?: number; fixedWeekday?: number;
+  zone?: Zone; test?: TestKind; repKm?: number; fixedWeekday?: number;
 }
 interface Ctx { prevLong: IsoDate | null; prevSpeed: IsoDate | null }
 
@@ -324,7 +327,7 @@ export function baseVolumes(count: number, startKm: number, maxKm: number): numb
 
 interface TplSession {
   key: number; kind: SessionKind; name: string; steps: string[]; zone: Zone; durationMin: number | null; distanceKm: number | null;
-  test?: '3k' | '5k'; repKm?: number; fixedWeekday?: number;
+  test?: TestKind; repKm?: number; fixedWeekday?: number;
 }
 interface Tpl {
   weeks: Array<{ title?: string; deload?: boolean; sessions: TplSession[] }>;
@@ -336,6 +339,17 @@ interface Tpl {
 }
 
 function template(c: CurriculumId, easyPace: number): Tpl {
+  if (c === 'maf') {
+    return {
+      idPrefix: 'm', capRecovery: false, taperCut: false, keepPreRaceDay: true, raceSteps: MAF_RACE_STEPS,
+      weeks: MAF_5K.map((w) => ({
+        title: w.title, deload: w.deload,
+        sessions: w.sessions.map((x, key) => ({
+          ...x, key, distanceKm: x.kind === 'speed' ? null : round1((x.durationMin * 60) / easyPace),
+        })),
+      })),
+    };
+  }
   if (c === 'progressive5k') {
     return {
       idPrefix: 'p', capRecovery: false, taperCut: false, keepPreRaceDay: true, raceSteps: PROGRESSIVE_RACE_STEPS,
@@ -367,13 +381,13 @@ export function enforceLongMargin(drafts: Draft[], easyPace: number, capRecovery
   let out = drafts.map((d) => ({ ...d }));
   if (capRecovery) {
     out = out.map((d) => {
-      if (d.kind !== 'recovery' || d.zone !== 'easy' || d.demoted || d.durationMin == null || d.durationMin <= RECOVERY_MAX_MIN) return d;
+      if (d.kind !== 'recovery' || (d.zone !== 'easy' && d.zone !== 'maf') || d.demoted || d.durationMin == null || d.durationMin <= RECOVERY_MAX_MIN) return d;
       const km = d.distanceKm != null ? round1((d.distanceKm * RECOVERY_MAX_MIN) / d.durationMin) : null;
       return { ...d, durationMin: RECOVERY_MAX_MIN, distanceKm: km, name: renameForMinutes(d.name, RECOVERY_MAX_MIN) };
     });
   }
   if (exempt) return out;
-  const easy = out.filter((d) => d.kind === 'recovery' && d.zone === 'easy' && d.durationMin != null);
+  const easy = out.filter((d) => d.kind === 'recovery' && (d.zone === 'easy' || d.zone === 'maf') && d.durationMin != null);
   const li = out.findIndex((d) => d.kind === 'long' && d.durationMin != null);
   if (li < 0 || !easy.length) return out;
   const L = out[li];
@@ -401,7 +415,7 @@ export function buildPlan(o: PlanOptions): Plan {
   const weeks: PlanWeek[] = [];
   let ctx: Ctx = { prevLong: null, prevSpeed: null };
   const marginKm = Math.max(LONG_MARGIN_KM, (LONG_MARGIN_MIN * 60) / o.easyPaceSecPerKm);
-  const withHr = (zone: Zone | undefined) => (zone ? hrRange(zone, o.maxHr) : null);
+  const withHr = (zone: Zone | undefined) => (zone ? hrRange(zone, o.maxHr, o.mafHr) : null);
 
   for (let i = 0; i < total; i++) {
     const end = addDays(raceDay, -7 * (total - 1 - i));
@@ -428,7 +442,7 @@ export function buildPlan(o: PlanOptions): Plan {
       const longKm = n === 1 ? V : round1(Math.max(easyKm + marginKm, Math.min(V - easyKm * (n - 1), V * BASE_LONG_MAX_SHARE)));
       const bj = baseCount - i; // b1 = minggu Base tepat sebelum blok puncak (id stabil seiring waktu)
       const mk = (kind: SessionKind, km: number, k: number): Draft => ({
-        id: `b${bj}-${k}`, kind, name: kind === 'long' ? 'Long Run' : 'Easy Run', steps: [], zone: 'easy',
+        id: `b${bj}-${k}`, kind, name: kind === 'long' ? 'Long Run' : 'Easy Run', steps: [], zone: o.curriculum === 'maf' ? 'maf' : 'easy',
         distanceKm: km, durationMin: Math.round((km * o.easyPaceSecPerKm) / 60),
       });
       drafts = n === 1 ? [mk('long', longKm, 0)] : [...Array.from({ length: n - 1 }, (_, k) => mk('recovery', easyKm, k)), mk('long', longKm, n - 1)];

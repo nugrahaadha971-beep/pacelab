@@ -19,7 +19,7 @@ const PROGRAM_TABS: ReadonlyArray<{ id: ProgramTab; label: string }> = [
   { id: 'jadwal', label: 'Jadwal' },
 ];
 const card = 'sport-card p-4';
-const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K']];
+const MODE_PILLS: Array<[PlanMode, string]> = [['auto', 'Otomatis'], ['progressive5k', 'Progresif 5K'], ['nike5k', 'Nike 5K'], ['maf', 'MAF']];
 
 /** Bar progres dengan semantik progressbar; hijau bila sudah memenuhi syarat. */
 function Meter({ label, ratio }: { label: string; ratio: number }) {
@@ -122,7 +122,7 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
             {mode !== 'auto' && curriculum !== selection.plan && (
               <p className="mt-1 text-xs text-amber-400">Rekomendasi otomatis saat ini: {PLAN_LABEL[selection.plan]}.</p>
             )}
-            <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Pilih program latihan">
+            <div className="mt-3 grid grid-cols-2 gap-2" role="group" aria-label="Pilih program latihan">
               {MODE_PILLS.map(([m, label]) => (
                 <button key={m} type="button" aria-pressed={mode === m} onClick={() => chooseMode(m)}
                   className={`min-h-[44px] rounded-xl px-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-coral ${
@@ -135,7 +135,13 @@ export default function Program({ profile, workouts, onProfileChange }: { profil
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-300">
               {selection.reasons.map((r, i) => <li key={i}>{r}</li>)}
             </ul>
-            {target !== '5K' && <p className="mt-2 text-xs text-slate-400">Kedua program ini untuk 5K, sedangkan jarak target Anda {target}.</p>}
+            {mode === 'maf' && (
+              <p className="mt-2 text-sm text-sky-300">Program MAF: semua lari di zona detak jantung MAF (180 − usia). Atur kondisi Anda dan lihat zona di tab Jadwal.</p>
+            )}
+            {mode !== 'maf' && ((selection.metrics.easyHrPct != null && selection.metrics.easyHrPct > 0.8) || (selection.metrics.driftPct ?? 0) > 5) && (
+              <p className="mt-2 text-sm text-sky-300">Lari santai Anda masih di atas zona aerobik. Program MAF (batas detak jantung rendah) juga cocok untuk membangun fondasi.</p>
+            )}
+            {target !== '5K' && <p className="mt-2 text-xs text-slate-400">Ketiga program ini untuk 5K, sedangkan jarak target Anda {target}.</p>}
           </section>
 
           <section className={card}>

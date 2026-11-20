@@ -5,6 +5,7 @@ import { PENALTY_RULES, RACE_KM } from '../analytics/predictor';
 import { applyAdaptation, calibrateFrom3k, evaluateAdaptation, gatherAdaptiveInput, intervalPaceRange, TEST3K_FACTOR, weekPace } from '../plans/adaptiveEngine';
 import { HR_FIRST_RULE, resolveMaxHr, ZONE_LABEL } from '../plans/hrZones';
 import { STRENGTH_NOTE } from '../plans/progressive5k';
+import { mafHr, mafTests, MAF_RULE } from '../plans/maf';
 import { fmtKm, fmtPace, fmtRangeKm, nearestRow, paceKeyFor, paceSecPerKm } from '../plans/pace';
 import {
   addDays, applyScheduleState, autoCompleted, buildPlan, completedIds, dayNum, flattenPlan, formatDateId, formatDayMonth,
@@ -12,9 +13,10 @@ import {
   WEEKDAY_SHORT,
 } from '../plans/schedule';
 import type { CurriculumId, Phase, PlanSession, ScheduleState } from '../plans/schedule';
-import { loadScheduleState, saveScheduleState } from '../plans/scheduleStore';
+import { loadMafAdj, loadScheduleState, saveMafAdj, saveScheduleState } from '../plans/scheduleStore';
 import { parseDuration } from '../parsers/manual';
 import { fmtDate, fmtHms, todayStr } from './format';
+import MafCard from './MafCard';
 import Sheet from './Sheet';
 import { KIND_BORDER, KIND_LABEL } from './sessionMeta';
 import { Button, Field } from './ui';
@@ -25,6 +27,14 @@ const KIND_HINT: Record<PlanSession['kind'], string> = {
   speed: 'Lari cepat berinterval. Ikuti pace tiap langkah; sela pemulihan dilakukan dengan lari/jalan pelan.',
   race: 'Hari uji PB: lari dengan target pace PB di bawah.',
 };
+const MAF_HINT: Record<PlanSession['kind'], string> = {
+  recovery: 'Lari santai di zona MAF: jaga detak jantung di antara batas bawah dan MAF. Pace mengikuti detak jantung.',
+  long: 'Lari terpanjang minggu ini, tetap di zona MAF. Boleh jeda jalan bila detak jantung melewati MAF.',
+  speed: 'MAF Test: lari 5 km di detak jantung MAF dan catat waktu tiap km. Pace yang makin cepat di detak jantung sama = fondasi aerobik membaik.',
+  race: 'Hari lomba: lari dengan usaha terkendali menuju target pace.',
+};
+/** Panjang blok kurikulum penuh (minggu). */
+const PEAK_WEEKS: Record<CurriculumId, number> = { nike5k: 8, progressive5k: 11, maf: 12 };
 const PHASE_LABEL: Record<Phase, string> = { base: 'Base Building', build: 'Build', taper: 'Taper', race: 'Lomba' };
 const STORE_KEY = 'pacelab.k5';
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Sen … Min
@@ -123,6 +133,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const [st, setSt] = useState<ScheduleState>(loadScheduleState);
   const [weekIdx, setWeekIdx] = useState(0);
   const [settings, setSettings] = useState(false);
+  const [mafAdj, setMafAdj] = useState(loadMafAdj);
   const [k5Text, setK5Text] = useState(() => loadSaved() ?? (defaultK5Sec != null ? fmtHms(defaultK5Sec) : ''));
   const [fromPrediction, setFromPrediction] = useState(() => loadSaved() == null && defaultK5Sec != null);
   const k5 = parseDuration(k5Text);
@@ -139,6 +150,9 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const raceIso = profile.targetRaceDate ? isoFromRaceTs(profile.targetRaceDate) : null;
   const targetPace = profile.targetTimeSec / RACE_KM[profile.targetDistance];
   const maxHr = resolveMaxHr(profile, workouts);
+  const maf = mafHr(profile.age, mafAdj);
+  const mafPts = curriculum === 'maf' ? mafTests(workouts, maf) : [];
+  const mafCenter = mafPts.length ? mafPts[mafPts.length - 1].paceSecPerKm : null;
   const maxWeeklyKm = profile.weeklyTargetKm ?? PENALTY_RULES[profile.targetDistance]?.weeklyKm ?? 50;
 
   const title = <h2 className="text-lg font-bold">Jadwal latihan · menuju PB {profile.targetDistance}</h2>;
@@ -166,7 +180,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
   const easyPace = paceSecPerKm('rec', row) ?? easyPaceSecPerKm;
   const basePlan = buildPlan({
     raceIso, todayIso, days: st.days, raceName: `${profile.targetDistance} · Hari Lomba / Uji PB`,
-    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace, curriculum, maxHr,
+    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace, curriculum, maxHr, mafHr: maf,
   });
   const plan = applyScheduleState(basePlan, st, raceIso);
   const flat = flattenPlan(plan);
@@ -219,15 +233,19 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
         {head}
         <p className="text-sm tabular-nums text-slate-300">
           {plan.daysRemaining} hari · {plan.weeksRemaining} minggu menuju {formatDateId(raceIso)}
-          {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak ${curriculum === 'progressive5k' ? 11 : 8} minggu` : ''}
+          {plan.baseWeeks > 0 ? ` · ${plan.baseWeeks} minggu Base Building + blok puncak ${PEAK_WEEKS[curriculum]} minggu` : ''}
         </p>
-        {curriculum === 'progressive5k' && plan.totalWeeks < 11 && (
+        {curriculum !== 'nike5k' && plan.totalWeeks < PEAK_WEEKS[curriculum] && (
           <p className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300">
-            Tersisa {plan.totalWeeks} minggu (kurikulum penuh 11 minggu): minggu awal fase Fondasi dilewati, jadi pelan-pelan dan utamakan detak jantung.
+            Tersisa {plan.totalWeeks} minggu (kurikulum penuh {PEAK_WEEKS[curriculum]} minggu): minggu awal fase Fondasi dilewati, jadi pelan-pelan dan utamakan detak jantung.
           </p>
         )}
         {missed > 0 && <p className="text-sm text-amber-400">{missed} sesi terlewat. Buka "Atur jadwal" untuk menggeser jadwal.</p>}
       </header>
+
+      {curriculum === 'maf' && (
+        <MafCard age={profile.age} adj={mafAdj} onAdj={(a) => { setMafAdj(a); saveMafAdj(a); }} maf={maf} points={mafPts} />
+      )}
 
       <section className="rounded-2xl border border-coral/40 bg-coral/5 p-4 text-sm" aria-labelledby="adaptasi-judul">
         <h3 id="adaptasi-judul" className="font-semibold">Penyesuaian terbaru dari sesi terakhir</h3>
@@ -321,14 +339,23 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
                   </button>
                 </div>
               </div>
-              <h3 className="text-base font-bold">{s.convertedFrom ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`}</h3>
-              <p className="mt-0.5 text-sm text-slate-400">{KIND_HINT[s.kind]}</p>
+              <h3 className="text-base font-bold">{s.convertedFrom || s.test === 'maf' ? s.name : `${KIND_LABEL[s.kind]}${showName ? ` · ${s.name}` : ''}`}</h3>
+              <p className="mt-0.5 text-sm text-slate-400">{s.zone === 'maf' ? MAF_HINT[s.kind] : KIND_HINT[s.kind]}</p>
               {s.kind === 'race' && <div className="mt-1 text-sm">{s.name}</div>}
               {easy && km != null && min != null && (
                 <div className="mt-2 rounded-xl bg-navy-900 p-3 text-sm tabular-nums">
                   <div>Jarak: <strong className="text-base">{km.toFixed(1)} km</strong> <span className="text-slate-400">(≈{Math.round(min)} menit)</span></div>
-                  <div>Pace: <strong className="text-base text-emerald-400">{fmtRangeKm(easyPace + delta)}</strong></div>
-                  {s.hr && <div>Detak jantung: <strong className="text-base text-emerald-400">{s.hr[0]}–{s.hr[1]} bpm</strong></div>}
+                  {s.zone === 'maf' ? (
+                    <>
+                      {s.hr && <div>Detak jantung (utama): <strong className="text-base text-emerald-400">{s.hr[0]}–{s.hr[1]} bpm</strong></div>}
+                      <div>Pace perkiraan: <strong className="text-base text-slate-100">{fmtRangeKm((mafCenter ?? easyPace) + delta)}</strong> <span className="text-slate-400">(ikuti detak jantung)</span></div>
+                    </>
+                  ) : (
+                    <>
+                      <div>Pace: <strong className="text-base text-emerald-400">{fmtRangeKm(easyPace + delta)}</strong></div>
+                      {s.hr && <div>Detak jantung: <strong className="text-base text-emerald-400">{s.hr[0]}–{s.hr[1]} bpm</strong></div>}
+                    </>
+                  )}
                 </div>
               )}
               {!easy && s.hr && s.zone && (
@@ -337,9 +364,9 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
               )}
               {calibPace && <div className="text-sm tabular-nums">Pace ulangan (dari Tes 3K): <strong className="text-emerald-400">{fmtRangeMinMax(calibPace)}</strong></div>}
               {s.hr && (
-                <p className="mt-1 text-sm text-amber-300">{HR_FIRST_RULE}{s.zone === 'easy' ? ` Jalan sampai detak jantung < ${s.hr[0]} bpm.` : ''}</p>
+                <p className="mt-1 text-sm text-amber-300">{s.zone === 'maf' ? MAF_RULE : HR_FIRST_RULE}{s.zone === 'easy' ? ` Jalan sampai detak jantung < ${s.hr[0]} bpm.` : ''}</p>
               )}
-              {!s.hr && s.zone && <p className="mt-1 text-sm text-slate-400">Isi detak jantung maksimal di Profil untuk melihat target bpm.</p>}
+              {!s.hr && s.zone && <p className="mt-1 text-sm text-slate-400">{s.zone === 'maf' ? 'Isi usia di Profil untuk melihat target bpm MAF.' : 'Isi detak jantung maksimal di Profil untuk melihat target bpm.'}</p>}
               {s.kind === 'speed' && min != null && (
                 <div className="mt-1 text-sm tabular-nums">Total ≈ <strong>{Math.round(min)} menit</strong> (termasuk pemanasan & pemulihan)</div>
               )}
@@ -357,7 +384,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
                 const sec = curriculum === 'nike5k' ? paceSecPerKm(paceKeyFor(stp), row, delta) : null;
                 return <div key={j} className="text-sm">{stp}{sec != null && <em className="text-emerald-400"> → {fmtKm(sec)}</em>}</div>;
               })}
-              {gp != null && (s.kind === 'speed' || s.kind === 'race') && (
+              {gp != null && (s.kind === 'speed' || s.kind === 'race') && s.test !== 'maf' && (
                 <div className="mt-1 text-sm tabular-nums text-slate-300">
                   {s.kind === 'race' ? 'Target pace PB' : `Pace menuju PB ${profile.targetDistance}`}: <span className="font-semibold">{fmtKm(gp)}</span>
                 </div>
@@ -393,6 +420,7 @@ export default function TrainingPlan({ profile, workouts, defaultK5Sec, currentP
           <p><strong>Speed Run</strong>: sesi cepat (interval/tempo). Ada pemanasan, bagian cepat dengan pace tertentu, lalu pemulihan pelan.</p>
           <p><strong>Lari-jalan (L/J)</strong>: 6×(3' Lari / 1' Jalan) artinya lari pelan 3 menit, jalan 1 menit, diulang 6 kali. <strong>Strides</strong>: 20 detik lari cepat tapi rileks, jalan 40 detik.</p>
           <p><strong>Detak jantung dulu (HR-first)</strong>: detak jantung adalah patokan utama; pace hanya perkiraan. Di cuaca panas detak jantung naik, jadi perlambat atau jalan sampai turun.</p>
+          {curriculum === 'maf' && <p><strong>Zona MAF</strong>: rentang detak jantung (HR MAF − 10 sampai HR MAF) tempat seluruh lari dilakukan. Pace adalah hasil, bukan target; yang dipantau adalah pace di detak jantung yang sama dari waktu ke waktu.</p>}
           <p className="text-xs text-slate-400">Setiap kartu menampilkan jarak (km) dan pace dalam menit per km. Pace santai ditampilkan sebagai rentang; lebih lambat sedikit tidak masalah, jangan lebih cepat.</p>
         </div>
       </details>

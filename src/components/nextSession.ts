@@ -3,13 +3,14 @@ import { currentVdot, PENALTY_RULES, predictAll, RACE_KM, velocityFor, ZONE_FRAC
 import { DAY_MS } from '../analytics/workload';
 import { applyAdaptation, evaluateAdaptation, gatherAdaptiveInput, weekPace } from '../plans/adaptiveEngine';
 import { resolveMaxHr } from '../plans/hrZones';
+import { mafHr, mafTests } from '../plans/maf';
 import { fmtKm, fmtRangeKm, nearestRow, paceSecPerKm } from '../plans/pace';
 import { resolvePlan, selectBestPlan } from '../plans/planSelector';
 import {
   applyScheduleState, buildPlan, completedIds, dayNum, flattenPlan, formatDayMonth, isoFromLocal, isoFromRaceTs,
 } from '../plans/schedule';
 import type { PlanSession } from '../plans/schedule';
-import { loadPlanMode, loadScheduleState } from '../plans/scheduleStore';
+import { loadMafAdj, loadPlanMode, loadScheduleState } from '../plans/scheduleStore';
 import { parseDuration } from '../parsers/manual';
 import { fmtHms, todayStr } from './format';
 
@@ -53,11 +54,14 @@ export function nextSession(profile: UserProfile, workouts: Workout[], now: numb
   const easyPace = paceSecPerKm('rec', row) ?? easyVdot;
 
   const maxHr = resolveMaxHr(profile, workouts);
+  const maf = curriculum === 'maf' ? mafHr(profile.age, loadMafAdj()) : null;
+  const mafPts = curriculum === 'maf' ? mafTests(workouts, maf) : [];
+  const mafCenter = mafPts.length ? mafPts[mafPts.length - 1].paceSecPerKm : null;
   const maxWeeklyKm = profile.weeklyTargetKm ?? PENALTY_RULES[target]?.weeklyKm ?? 50;
   const st = loadScheduleState();
   const base = buildPlan({
     raceIso, todayIso, days: st.days, raceName: `${target} · Hari Lomba / Uji PB`,
-    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace, curriculum, maxHr,
+    startWeeklyKm, maxWeeklyKm, easyPaceSecPerKm: easyPace, curriculum, maxHr, mafHr: maf,
   });
   const plan = applyScheduleState(base, st, raceIso);
   const flat = flattenPlan(plan);
@@ -74,7 +78,8 @@ export function nextSession(profile: UserProfile, workouts: Workout[], now: numb
   const currentPace = pred ? pred.finalSec / RACE_KM[target] : null;
   const easy = s.kind === 'recovery' || s.kind === 'long';
   let paceText: string | null = null;
-  if (easy) paceText = fmtRangeKm(easyPace + (s.paceDeltaSec ?? 0));
+  if (s.zone === 'maf') paceText = fmtRangeKm((mafCenter ?? easyPace) + (s.paceDeltaSec ?? 0));
+  else if (easy) paceText = fmtRangeKm(easyPace + (s.paceDeltaSec ?? 0));
   else if (s.kind === 'race') paceText = fmtKm(targetPace);
   else if (currentPace != null) paceText = fmtKm(weekPace(currentPace, targetPace, s.weekNo, plan.totalWeeks));
 
